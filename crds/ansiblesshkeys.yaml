@@ -1,0 +1,103 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ansiblesshkeys.a5e.k8s.rocks
+spec:
+  group: a5e.k8s.rocks
+  scope: Namespaced
+  names:
+    kind: AnsibleSSHKey
+    listKind: AnsibleSSHKeyList
+    plural: ansiblesshkeys
+    singular: ansiblesshkey
+    shortNames:
+      - ansiblesshkey
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: KeyType
+          jsonPath: .status.keyType
+          type: string
+        - name: Age
+          jsonPath: .metadata.creationTimestamp
+          type: date
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                secretRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    key:
+                      type: string
+                  required:
+                    - name
+                passphraseSecretRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    key:
+                      type: string
+                  required:
+                    - name
+              required:
+                - secretRef
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - message
+                      - lastTransitionTime
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                publicKey:
+                  type: string
+                fingerprint:
+                  type: string
+                keyType:
+                  type: string
+                  enum:
+                    - rsa
+                    - ed25519
+                    - ecdsa

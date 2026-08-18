@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "a5e.operatorName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "operator") | nindent 4 }}
+spec:
+  # Leader election makes >1 replica safe, but a single replica + Recreate is the simplest
+  # correct default — fewer moving parts, and this workload has no meaningful availability gap
+  # to buy back with more replicas (a few seconds of reconcile downtime on upgrade is fine).
+  replicas: {{ .Values.operator.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "a5e.componentSelectorLabels" (list . "operator") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "a5e.componentSelectorLabels" (list . "operator") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "a5e.operatorName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: operator
+          image: {{ include "a5e.image" (list . .Values.operator.image) }}
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          env:
+            # In-cluster auth always uses the mounted ServiceAccount token (bearer, never mTLS),
+            # so the Bun+client-node TLS incompatibility (packages/k8s-client/src/bootstrap.ts)
+            # only needs this one static, well-known CA path — no runtime discovery needed.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - name: RUNNER_IMAGE
+              value: {{ include "a5e.image" (list . .Values.runner.image) }}
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: S3_BUCKET
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: bucket, optional: true } }
+            - name: S3_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: accessKeyId, optional: true } }
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: secretAccessKey, optional: true } }
+            - name: S3_ENDPOINT
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: endpoint, optional: true } }
+            - name: S3_REGION
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: region, optional: true } }
+            {{- with .Values.operator.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

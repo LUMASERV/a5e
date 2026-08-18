@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "a5e.operatorName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "operator") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "a5e.operatorName" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "operator") | nindent 4 }}
+rules:
+  # All 10 CRD kinds + their /status subresource.
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources:
+      - ansiblehosts
+      - clusteransiblehosts
+      - ansibleinventories
+      - clusteransibleinventories
+      - ansibleplaybooks
+      - clusteransibleplaybooks
+      - ansiblesshkeys
+      - clusteransiblesshkeys
+      - ansiblejobs
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources:
+      - ansiblehosts/status
+      - clusteransiblehosts/status
+      - ansibleinventories/status
+      - clusteransibleinventories/status
+      - ansibleplaybooks/status
+      - clusteransibleplaybooks/status
+      - ansiblesshkeys/status
+      - clusteransiblesshkeys/status
+      - ansiblejobs/status
+    verbs: ["get", "update", "patch"]
+  # AnsibleRun additionally needs create/delete: the AnsibleJob controller spawns Runs on their
+  # configured cron schedule and prunes old ones past successfulRunsHistoryLimit/
+  # failedRunsHistoryLimit — the only place the operator itself creates/deletes a CR rather than
+  # just reconciling one a user created via the API.
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources: ["ansibleruns"]
+    verbs: ["get", "list", "watch", "update", "patch", "create", "delete"]
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources: ["ansibleruns/status"]
+    verbs: ["get", "update", "patch"]
+
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Broader than a plain "get": the run controller copies the referenced SSH-key/git-auth Secret
+  # into a Run-owned Secret in the Run's own namespace (a Secret volume can only mount a Secret
+  # in the same namespace as the Pod, and a ClusterAnsibleSSHKey's secretRef is often elsewhere).
+  # Cluster-wide `get` on arbitrary Secrets is an accepted risk — RBAC can't scope "get" to only
+  # the dynamically-named Secrets a spec happens to reference. This used to be a much bigger risk
+  # than intended: a namespaced object's secretRef/configMapRef could name ANY namespace, letting
+  # a user with only namespace-local create-RBAC exfiltrate another namespace's Secrets with zero
+  # RBAC there (fixed via resolveRefNamespace — see packages/k8s-client/src/ref-namespace.ts — a
+  # namespaced object's refs must now stay in its own namespace; only a genuinely Cluster-scoped
+  # object, e.g. ClusterAnsibleSSHKey, may legitimately name a different one). What remains is the
+  # narrower, still-real risk that a compromised operator process could read any cluster Secret —
+  # inherent to supporting Cluster*-scoped cross-namespace secretRef at all, not RBAC-fixable.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "a5e.operatorName" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "operator") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "a5e.operatorName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "a5e.operatorName" . }}
+    namespace: {{ include "a5e.namespace" . }}

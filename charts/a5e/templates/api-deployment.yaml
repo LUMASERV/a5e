@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "a5e.apiName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+spec:
+  # In-memory session store (auth/session-store.ts) — do not scale this beyond 1 replica without
+  # moving sessions to a shared store first, or logins will randomly bounce between pods.
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "a5e.componentSelectorLabels" (list . "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "a5e.componentSelectorLabels" (list . "api") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "a5e.apiName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: api
+          image: {{ include "a5e.image" (list . .Values.api.image) }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: production
+            # See packages/k8s-client/src/bootstrap.ts — in-cluster auth is always bearer-token,
+            # so this one static, well-known CA path is all Bun's TLS workaround needs.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - name: PORT
+              value: "3000"
+            - name: UI_ORIGIN
+              value: {{ .Values.api.uiOrigin | quote }}
+            {{- if .Values.api.origin }}
+            # Only needed when the API has its own public domain, separate from the UI's (see
+            # api.ingress) — the OIDC redirect_uri must point at wherever /api/v1/auth/callback
+            # is actually reachable, which is this origin, not api.uiOrigin, once they differ.
+            - name: API_ORIGIN
+              value: {{ .Values.api.origin | quote }}
+            {{- end }}
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            {{- if and .Values.api.bootstrapAdmin.username .Values.api.bootstrapAdmin.password }}
+            # Only ever creates an account the very first time the local-accounts store is
+            # empty — safe to leave set indefinitely (see auth/bootstrap.ts).
+            - name: BOOTSTRAP_ADMIN_USERNAME
+              value: {{ .Values.api.bootstrapAdmin.username | quote }}
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              value: {{ .Values.api.bootstrapAdmin.password | quote }}
+            {{- end }}
+            # OIDC is primarily configured live from the Settings page (stored in a Secret the
+            # API manages itself — see lib/oidc-config-store.ts); these env vars are only a
+            # bootstrap-time fallback for environments that prefer an out-of-band Secret instead.
+            - name: OIDC_ISSUER
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.oidcSecretName" . }}, key: issuer, optional: true } }
+            - name: OIDC_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.oidcSecretName" . }}, key: clientId, optional: true } }
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.oidcSecretName" . }}, key: clientSecret, optional: true } }
+            - name: S3_BUCKET
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: bucket, optional: true } }
+            - name: S3_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: accessKeyId, optional: true } }
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: secretAccessKey, optional: true } }
+            - name: S3_ENDPOINT
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: endpoint, optional: true } }
+            - name: S3_REGION
+              valueFrom: { secretKeyRef: { name: {{ include "a5e.s3SecretName" . }}, key: region, optional: true } }
+            {{- with .Values.api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: 3000 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "a5e.apiName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+spec:
+  type: {{ .Values.api.service.type }}
+  selector:
+    {{- include "a5e.componentSelectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: 3000

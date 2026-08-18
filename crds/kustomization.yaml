@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ansiblehosts.yaml
+  - clusteransiblehosts.yaml
+  - ansibleinventories.yaml
+  - clusteransibleinventories.yaml
+  - ansibleplaybooks.yaml
+  - clusteransibleplaybooks.yaml
+  - ansiblesshkeys.yaml
+  - clusteransiblesshkeys.yaml
+  - ansibleruns.yaml
+  - ansiblejobs.yaml
+  - rbac/

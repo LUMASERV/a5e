@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [schemas, k8s-client, operator, api, ui]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+        working-directory: packages/${{ matrix.package }}
+      - run: bun test --pass-with-no-tests
+        working-directory: packages/${{ matrix.package }}
+
+  crd-generate-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run crds:generate
+      - name: Fail if generated CRDs are out of date
+        run: |
+          git diff --exit-code -- crds/ charts/a5e/templates/crds/ || \
+            (echo "::error::crds/*.yaml or charts/a5e/templates/crds/*.yaml are out of date — run 'bun run crds:generate' and commit the result." && exit 1)

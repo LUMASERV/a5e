@@ -1,0 +1,27 @@
+{
+  "name": "a5e",
+  "private": true,
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "test": "bun run --filter '*' test",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "crds:generate": "bun run --filter schemas generate",
+    "crds:apply": "kubectl apply -k crds/",
+    "dev:operator": "bun run --filter operator dev",
+    "dev:api": "bun run --filter api dev",
+    "dev:ui": "bun run --filter ui dev",
+    "seed": "bun run scripts/seed-fixtures.ts"
+  },
+  "dependencies": {
+    "@a5e/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,246 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ansibleruns.a5e.k8s.rocks
+spec:
+  group: a5e.k8s.rocks
+  scope: Namespaced
+  names:
+    kind: AnsibleRun
+    listKind: AnsibleRunList
+    plural: ansibleruns
+    singular: ansiblerun
+    shortNames:
+      - ansiblerun
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          jsonPath: .status.phase
+          type: string
+        - name: StartTime
+          jsonPath: .status.startTime
+          type: string
+        - name: Age
+          jsonPath: .metadata.creationTimestamp
+          type: date
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                playbookRef:
+                  type: object
+                  properties:
+                    apiGroup:
+                      type: string
+                      default: a5e.k8s.rocks
+                    kind:
+                      type: string
+                      enum:
+                        - AnsiblePlaybook
+                        - ClusterAnsiblePlaybook
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                    - kind
+                    - name
+                  x-kubernetes-validations:
+                    - rule: "!self.kind.startsWith('Cluster') || !has(self.namespace)"
+                      message: namespace must be absent when kind is a Cluster* kind
+                inventoryRef:
+                  type: object
+                  properties:
+                    apiGroup:
+                      type: string
+                      default: a5e.k8s.rocks
+                    kind:
+                      type: string
+                      enum:
+                        - AnsibleInventory
+                        - ClusterAnsibleInventory
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                    - kind
+                    - name
+                  x-kubernetes-validations:
+                    - rule: "!self.kind.startsWith('Cluster') || !has(self.namespace)"
+                      message: namespace must be absent when kind is a Cluster* kind
+                extraVars:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                ansibleOptions:
+                  type: object
+                  properties:
+                    verbosity:
+                      type: integer
+                      minimum: 0
+                      maximum: 4
+                    tags:
+                      type: array
+                      items:
+                        type: string
+                    skipTags:
+                      type: array
+                      items:
+                        type: string
+                    limit:
+                      type: string
+                    checkMode:
+                      type: boolean
+                    forks:
+                      type: integer
+                      minimum: 1
+                timeoutSeconds:
+                  type: integer
+                  exclusiveMinimum: true
+                  minimum: 0
+                ttlSecondsAfterFinished:
+                  type: integer
+                  minimum: 0
+                serviceAccountName:
+                  type: string
+                resources:
+                  type: object
+                  properties:
+                    limits:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    requests:
+                      type: object
+                      additionalProperties:
+                        type: string
+                cancel:
+                  type: boolean
+              required:
+                - playbookRef
+                - inventoryRef
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - message
+                      - lastTransitionTime
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Resolving
+                    - Running
+                    - Succeeded
+                    - Failed
+                    - Error
+                    - Cancelled
+                startTime:
+                  type: string
+                completionTime:
+                  type: string
+                jobRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                podName:
+                  type: string
+                exitCode:
+                  type: integer
+                failedStep:
+                  type: string
+                  enum:
+                    - GitClone
+                    - DependencyInstall
+                    - Playbook
+                resolvedPlaybookRevision:
+                  type: string
+                resolvedInventoryConfigMapRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                stats:
+                  type: object
+                  properties:
+                    ok:
+                      type: integer
+                    changed:
+                      type: integer
+                    unreachable:
+                      type: integer
+                    failed:
+                      type: integer
+                    skipped:
+                      type: integer
+                logs:
+                  type: object
+                  properties:
+                    podRef:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        container:
+                          type: string
+                      required:
+                        - name
+                        - container
+                    s3:
+                      type: object
+                      properties:
+                        bucket:
+                          type: string
+                        key:
+                          type: string
+                        endpoint:
+                          type: string
+                        sizeBytes:
+                          type: integer
+                        uploadedAt:
+                          type: string
+                      required:
+                        - bucket
+                        - key

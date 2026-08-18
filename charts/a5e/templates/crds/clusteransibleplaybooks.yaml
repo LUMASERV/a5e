@@ -1,0 +1,170 @@
+{{- if .Values.crds.install }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusteransibleplaybooks.a5e.k8s.rocks
+  annotations:
+    {{- if .Values.crds.keep }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+spec:
+  group: a5e.k8s.rocks
+  scope: Cluster
+  names:
+    kind: ClusterAnsiblePlaybook
+    listKind: ClusterAnsiblePlaybookList
+    plural: clusteransibleplaybooks
+    singular: clusteransibleplaybook
+    shortNames:
+      - cansibleplaybook
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Age
+          jsonPath: .metadata.creationTimestamp
+          type: date
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                source:
+                  type: object
+                  properties:
+                    inline:
+                      type: object
+                      properties:
+                        playbook:
+                          type: string
+                          maxLength: 262144
+                      required:
+                        - playbook
+                    configMapRef:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        key:
+                          type: string
+                      required:
+                        - name
+                    git:
+                      type: object
+                      properties:
+                        url:
+                          type: string
+                        revision:
+                          type: string
+                        path:
+                          type: string
+                        sshKeySecretRef:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                            - name
+                        basicAuthSecretRef:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            namespace:
+                              type: string
+                          required:
+                            - name
+                      required:
+                        - url
+                      x-kubernetes-validations:
+                        - rule: (has(self.sshKeySecretRef)?1:0) + (has(self.basicAuthSecretRef)?1:0) <= 1
+                          message: at most one of source.git.sshKeySecretRef or
+                            source.git.basicAuthSecretRef may be set
+                  x-kubernetes-validations:
+                    - rule: (has(self.inline)?1:0) + (has(self.configMapRef)?1:0) +
+                        (has(self.git)?1:0) == 1
+                      message: exactly one of source.inline, source.configMapRef, source.git must be
+                        set
+                entryPoint:
+                  type: string
+                dependencies:
+                  type: object
+                  properties:
+                    roles:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          src:
+                            type: string
+                          scm:
+                            type: string
+                          version:
+                            type: string
+                        required:
+                          - name
+                    collections:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          source:
+                            type: string
+                          version:
+                            type: string
+                        required:
+                          - name
+                extraVars:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+              required:
+                - source
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - message
+                      - lastTransitionTime
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+{{- end }}

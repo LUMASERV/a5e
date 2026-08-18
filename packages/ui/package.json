@@ -1,0 +1,29 @@
+{
+  "name": "@a5e/ui",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "echo \"no UI unit tests yet\""
+  },
+  "dependencies": {
+    "@a5e/schemas": "workspace:*",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "pinia": "^2.3.0",
+    "element-plus": "^2.9.1",
+    "@element-plus/icons-vue": "^2.3.1",
+    "yaml": "^2.7.0",
+    "ansi_up": "^6.0.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
+  }
+}

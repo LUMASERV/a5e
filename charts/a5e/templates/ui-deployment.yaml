@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "a5e.uiName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "ui") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "a5e.componentSelectorLabels" (list . "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "a5e.componentSelectorLabels" (list . "ui") | nindent 8 }}
+      annotations:
+        checksum/nginx-config: {{ include (print $.Template.BasePath "/ui-nginx-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ui
+          image: {{ include "a5e.image" (list . .Values.ui.image) }}
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          env:
+            # Consumed by the image's docker-entrypoint.d script to generate runtime-config.js
+            # before nginx starts (Vite bakes env at *build* time, but this image is built once
+            # and reused across Helm installs, so the API's origin has to be injected at container
+            # start instead). Empty means "same origin, proxied via nginx" (nginx.conf's /api/
+            # location) — the default, single-domain deployment shape. Only set api.origin when
+            # the API has its own separate public domain (see api.ingress) and the browser should
+            # call it directly.
+            - name: API_ORIGIN
+              value: {{ .Values.api.origin | quote }}
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "a5e.uiName" . }}-nginx
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "a5e.uiName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "ui") | nindent 4 }}
+spec:
+  type: {{ .Values.ui.service.type }}
+  selector:
+    {{- include "a5e.componentSelectorLabels" (list . "ui") | nindent 4 }}
+  ports:
+    - port: {{ .Values.ui.service.port }}
+      targetPort: 80

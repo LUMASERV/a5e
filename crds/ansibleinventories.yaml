@@ -1,0 +1,144 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ansibleinventories.a5e.k8s.rocks
+spec:
+  group: a5e.k8s.rocks
+  scope: Namespaced
+  names:
+    kind: AnsibleInventory
+    listKind: AnsibleInventoryList
+    plural: ansibleinventories
+    singular: ansibleinventory
+    shortNames:
+      - ansibleinventory
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Hosts
+          jsonPath: .status.totalHosts
+          type: integer
+        - name: Age
+          jsonPath: .metadata.creationTimestamp
+          type: date
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                vars:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                groups:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      hostSources:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            kind:
+                              type: string
+                              enum:
+                                - AnsibleHost
+                                - ClusterAnsibleHost
+                            namespace:
+                              type: string
+                            labelSelector:
+                              type: object
+                              properties:
+                                matchLabels:
+                                  type: object
+                                  additionalProperties:
+                                    type: string
+                                matchExpressions:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        type: string
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                      values:
+                                        type: array
+                                        items:
+                                          type: string
+                                    required:
+                                      - key
+                                      - operator
+                          required:
+                            - kind
+                            - labelSelector
+                          x-kubernetes-validations:
+                            - rule: self.kind != 'AnsibleHost' || !has(self.namespace)
+                              message: namespace must be absent for kind AnsibleHost on a namespaced
+                                AnsibleInventory (always own namespace)
+                      vars:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      children:
+                        type: array
+                        items:
+                          type: string
+                    required:
+                      - name
+                      - hostSources
+              required:
+                - groups
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - message
+                      - lastTransitionTime
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                totalHosts:
+                  type: integer
+                groupCounts:
+                  type: object
+                  additionalProperties:
+                    type: integer

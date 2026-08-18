@@ -1,0 +1,32 @@
+a5e has been deployed to namespace {{ include "a5e.namespace" . }}.
+
+{{- if not .Values.ui.ingress.enabled }}
+
+No Ingress is enabled for the UI. Reach it with:
+  kubectl -n {{ include "a5e.namespace" . }} port-forward svc/{{ include "a5e.uiName" . }} 8080:{{ .Values.ui.service.port }}
+then open http://localhost:8080
+{{- else }}
+
+UI is reachable at:
+{{- range .Values.ui.ingress.hosts }}
+  http{{ if $.Values.ui.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- end }}
+
+{{- if and (not .Values.api.oidc.existingSecret) (not .Values.api.oidc.create) }}
+
+ℹ No bootstrap OIDC configuration was provided (api.oidc.existingSecret / api.oidc.create are
+  both unset) — that's fine, the primary way to configure it is the Settings page in the UI once
+  it's up (stored in a "a5e-oidc-config" Secret the API manages itself). The redirect URI
+  to register at your IdP is shown there too: {{ .Values.api.uiOrigin }}/api/v1/auth/callback
+{{- end }}
+
+{{- if and (not .Values.s3.existingSecret) (not .Values.s3.create) }}
+
+ℹ No S3 config was provided — AnsibleRun logs will stay pod-only (read live, lost once the
+  Job's Pod is garbage-collected). Set s3.create=true (or s3.existingSecret) to persist them.
+{{- end }}
+
+Once RoleBindings/ClusterRoleBindings map your OIDC group claims to RBAC on the CRDs, verify
+resources are being reconciled with:
+  kubectl -n {{ include "a5e.namespace" . }} get ansiblehosts,ansibleinventories,ansibleplaybooks,ansiblesshkeys,ansibleruns

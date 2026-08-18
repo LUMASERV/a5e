@@ -1,0 +1,24 @@
+{
+  "name": "@a5e/operator",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@a5e/k8s-client": "workspace:*",
+    "@a5e/schemas": "workspace:*",
+    "@kubernetes/client-node": "^2.0.0",
+    "cron-parser": "^4.9.0",
+    "sshpk": "^1.18.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/sshpk": "^1.17.5"
+  }
+}

@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: a5e-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: a5e-operator
+  namespace: a5e-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: a5e-operator
+rules:
+  # All 10 CRD kinds + their /status subresource (plan §3.3).
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources:
+      - ansiblehosts
+      - clusteransiblehosts
+      - ansibleinventories
+      - clusteransibleinventories
+      - ansibleplaybooks
+      - clusteransibleplaybooks
+      - ansiblesshkeys
+      - clusteransiblesshkeys
+      - ansiblejobs
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources:
+      - ansiblehosts/status
+      - clusteransiblehosts/status
+      - ansibleinventories/status
+      - clusteransibleinventories/status
+      - ansibleplaybooks/status
+      - clusteransibleplaybooks/status
+      - ansiblesshkeys/status
+      - clusteransiblesshkeys/status
+      - ansiblejobs/status
+    verbs: ["get", "update", "patch"]
+  # AnsibleRun additionally needs create/delete: the AnsibleJob controller spawns Runs on their
+  # configured cron schedule and prunes old ones past successfulRunsHistoryLimit/
+  # failedRunsHistoryLimit — the only place the operator itself creates/deletes a CR rather than
+  # just reconciling one a user created via the API.
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources: ["ansibleruns"]
+    verbs: ["get", "list", "watch", "update", "patch", "create", "delete"]
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources: ["ansibleruns/status"]
+    verbs: ["get", "update", "patch"]
+
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # NOTE: broader than plan §3.3's original "get only" — the run controller copies the
+  # referenced SSH-key/git-auth Secret into a Run-owned Secret in the Run's own namespace
+  # (create/update/patch/delete on those), since a Secret volume can only mount a Secret in the
+  # same namespace as the Pod and a ClusterAnsibleSSHKey's secretRef is often in a different one.
+  # Cluster-wide `get` on arbitrary Secrets remains an accepted risk (plan risk 5): RBAC can't
+  # scope "get" to only the dynamically-named Secrets a spec happens to reference. This used to be
+  # a much bigger risk than intended: a namespaced object's secretRef/configMapRef could name ANY
+  # namespace, so a user with only namespace-local create-RBAC could exfiltrate another
+  # namespace's Secrets with zero RBAC there (fixed via resolveRefNamespace — see
+  # packages/k8s-client/src/ref-namespace.ts — a namespaced object's refs must now stay in its own
+  # namespace; only a genuinely Cluster-scoped object, e.g. ClusterAnsibleSSHKey, may legitimately
+  # name a different one). What remains here is the narrower, still-real risk that a compromised
+  # operator process (RCE, malicious dependency) could read any Secret in the cluster — inherent
+  # to supporting Cluster*-scoped cross-namespace secretRef at all, not fixable via RBAC scoping.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch", "delete"]
+
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: a5e-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: a5e-operator
+subjects:
+  - kind: ServiceAccount
+    name: a5e-operator
+    namespace: a5e-system

@@ -1,0 +1,150 @@
+# Default values for the a5e chart.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Install into .Release.Namespace by default (i.e. `helm install -n a5e-system
+# --create-namespace`). Only set this if the release namespace must differ from where the
+# workloads actually run — the common case is to leave it empty.
+namespaceOverride: ""
+
+imagePullSecrets: []
+
+# Registry prefix applied to every component image unless that component sets its own
+# image.repository to a fully-qualified path. Component tags default to .Chart.AppVersion.
+image:
+  registry: registry.lumaserv.dev/public/a5e
+
+crds:
+  # Installs the 9 AnsibleHost/AnsibleInventory/AnsiblePlaybook/AnsibleSSHKey/AnsibleRun CRDs
+  # (+ Cluster* variants) as regular templates, so `helm upgrade` picks up schema changes —
+  # unlike Helm's special crds/ directory, which is intentionally never upgraded.
+  install: true
+  # Annotates the CRDs `helm.sh/resource-policy: keep` so `helm uninstall` doesn't delete them
+  # (and, transitively, every AnsibleHost/AnsibleRun/etc. custom resource in the cluster). Turn
+  # off only if something else manages the CRDs' lifecycle deliberately.
+  keep: true
+
+operator:
+  image:
+    repository: operator
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  extraEnv: []
+
+runner:
+  # Image the operator puts into every AnsibleRun Job's containers (ansible-core + git +
+  # openssh-client) — not a workload the chart deploys itself.
+  image:
+    repository: runner
+    tag: ""
+
+api:
+  image:
+    repository: api
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  # Origin the BFF's OIDC callback and CORS checks trust — set this to the UI's public URL.
+  uiOrigin: "https://a5e.example.com"
+  # The API's OWN public origin — only needed when it's deployed on a separate domain from the UI
+  # (see api.ingress below). Leave empty for the common single-domain setup, where the UI's own
+  # nginx reverse-proxies /api to this service internally and the API is never reachable directly
+  # from outside the cluster. When set: the OIDC redirect_uri is derived from THIS origin instead
+  # of uiOrigin (the callback route lives on the API, wherever that actually is), and the UI
+  # container's runtime config points the browser at this origin directly for every API call
+  # (auth is a bearer token specifically so this cross-origin call works without a shared-cookie
+  # setup — see auth/routes.ts).
+  origin: ""
+  extraEnv: []
+
+  # Exposes the API on its own Ingress/domain, separate from the UI's — set api.origin (above) to
+  # match whichever host you put here. Same shape as ui.ingress: annotations/tls are plain
+  # pass-through, so cert-manager (e.g. `cert-manager.io/cluster-issuer: letsencrypt` annotation +
+  # a tls entry) and haproxy-ingress source-IP allowlisting (e.g. the
+  # `haproxy-ingress.github.io/whitelist-source-range` annotation) both work exactly as they
+  # would on any other Ingress — nothing A5E-specific to configure beyond standard annotations.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: a5e-api.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  # OIDC Authorization Code + PKCE config for the API's BFF-style login. This is only a
+  # bootstrap-time default — the primary way to set/change it is the Settings page at runtime
+  # (stored in a "a5e-oidc-config" Secret the API manages itself). The redirect URI is
+  # never configured here — it's always derived from api.uiOrigin + /api/v1/auth/callback.
+  oidc:
+    # Name of an existing Secret with issuer/clientId/clientSecret keys. Takes precedence over
+    # create/issuer/clientId/... below when set.
+    existingSecret: ""
+    # If true and existingSecret is empty, the chart creates the Secret from the values below.
+    create: false
+    issuer: ""
+    clientId: ""
+    clientSecret: ""
+
+  # Creates exactly one local admin account (see auth/bootstrap.ts) the very first time the
+  # local-accounts store is empty — the on-ramp for a fresh install, since nobody can reach
+  # Settings to configure OIDC or create accounts without logging in at least once first. Never
+  # touches an existing account, so this is safe to leave set indefinitely; rotate/remove the
+  # password via Settings → Local accounts afterward instead of relying on this again.
+  bootstrapAdmin:
+    username: ""
+    password: ""
+
+ui:
+  image:
+    repository: ui
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: a5e.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+# Global run-log archival config, shared by the operator (uploads) and API (reads/downloads) —
+# see plan §3.4. Omit entirely to leave run logs pod-only (read live, lost once the Pod is GC'd).
+s3:
+  # Name of an existing Secret with bucket/accessKeyId/secretAccessKey/endpoint/region keys.
+  # Takes precedence over create/bucket/... below when set.
+  existingSecret: ""
+  # If true and existingSecret is empty, the chart creates the Secret from the values below.
+  create: false
+  bucket: ""
+  accessKeyId: ""
+  secretAccessKey: ""
+  endpoint: ""
+  region: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

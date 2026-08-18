@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "a5e.apiName" . }}
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "a5e.apiName" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+rules:
+  # The API's own ServiceAccount holds no direct CRUD on the CRDs — every CRUD call goes out
+  # impersonating the logged-in user (see CustomResourceClient), so real RBAC RoleBindings on the
+  # OIDC group claims are what actually authorize access, not this role.
+  # "users"/"groups" impersonation is a core-API-group resource (apiGroups: [""]) — only what the
+  # app's identity model actually impersonates (see plugins/k8s.ts's impersonatedOptions — it only
+  # ever sets Impersonate-User/Impersonate-Group). Deliberately NOT "serviceaccounts": granting
+  # that would let a leaked API ServiceAccount token impersonate ANY ServiceAccount in the
+  # cluster, including highly-privileged ones, for a capability the app never uses.
+  - apiGroups: [""]
+    resources: ["users", "groups"]
+    verbs: ["impersonate"]
+  # No direct `pods`/`pods/log` grant here: both live log streaming (modules/ansibleruns.ts, via
+  # @a5e/k8s-client's streamPodLog) and log download go out impersonated as the calling user, so
+  # they're authorized against that user's own RBAC bindings — the API's own ServiceAccount has
+  # no business reading arbitrary pod logs itself.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "a5e.apiName" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "a5e.apiName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "a5e.apiName" . }}
+    namespace: {{ include "a5e.namespace" . }}
+---
+# Namespaced Role (not a ClusterRole) so this stays confined to the API's own namespace: OIDC
+# config, local accounts, and the app-role registry for otherwise-unlinked OIDC users are
+# user-editable at runtime (Settings page — see lib/oidc-config-store.ts, auth/local-accounts.ts,
+# auth/roles.ts) and live in Secrets/a ConfigMap the API reads/writes as itself, never
+# impersonated. `resourceNames` scopes get/update/patch to exactly these objects, but Kubernetes
+# RBAC does NOT apply `resourceNames` to `create` (there's no existing object to name-check yet)
+# — the namespace boundary is what actually limits blast radius for that verb, not the
+# resourceNames list.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "a5e.apiName" . }}-oidc-config
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["a5e-oidc-config", "a5e-local-accounts"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  # a5e-oidc-user-roles: not sensitive (no passwords/secrets), just an identity->role map
+  # for OIDC subs never linked to a local account — a ConfigMap, not a Secret.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["a5e-oidc-user-roles"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "a5e.apiName" . }}-oidc-config
+  namespace: {{ include "a5e.namespace" . }}
+  labels:
+    {{- include "a5e.componentLabels" (list . "api") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "a5e.apiName" . }}-oidc-config
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "a5e.apiName" . }}
+    namespace: {{ include "a5e.namespace" . }}

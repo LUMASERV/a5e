@@ -1,0 +1,143 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ansiblehosts.a5e.k8s.rocks
+spec:
+  group: a5e.k8s.rocks
+  scope: Namespaced
+  names:
+    kind: AnsibleHost
+    listKind: AnsibleHostList
+    plural: ansiblehosts
+    singular: ansiblehost
+    shortNames:
+      - ansiblehost
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Address
+          jsonPath: .spec.ansibleAddress
+          type: string
+        - name: Age
+          jsonPath: .metadata.creationTimestamp
+          type: date
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                ansibleHost:
+                  type: string
+                ansibleAddress:
+                  type: string
+                ansiblePort:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                  default: 22
+                ansibleUser:
+                  type: string
+                  default: root
+                sshKeyRef:
+                  type: object
+                  properties:
+                    apiGroup:
+                      type: string
+                      default: a5e.k8s.rocks
+                    kind:
+                      type: string
+                      enum:
+                        - AnsibleSSHKey
+                        - ClusterAnsibleSSHKey
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                    - kind
+                    - name
+                  x-kubernetes-validations:
+                    - rule: "!self.kind.startsWith('Cluster') || !has(self.namespace)"
+                      message: namespace must be absent when kind is a Cluster* kind
+                jumpHost:
+                  type: object
+                  properties:
+                    address:
+                      type: string
+                    user:
+                      type: string
+                    port:
+                      type: integer
+                      minimum: 1
+                      maximum: 65535
+                    hostRef:
+                      type: object
+                      properties:
+                        apiGroup:
+                          type: string
+                          default: a5e.k8s.rocks
+                        kind:
+                          type: string
+                          enum:
+                            - AnsibleHost
+                            - ClusterAnsibleHost
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                        - kind
+                        - name
+                      x-kubernetes-validations:
+                        - rule: "!self.kind.startsWith('Cluster') || !has(self.namespace)"
+                          message: namespace must be absent when kind is a Cluster* kind
+                  x-kubernetes-validations:
+                    - rule: (has(self.address)?1:0) + (has(self.hostRef)?1:0) == 1
+                      message: exactly one of jumpHost.address or jumpHost.hostRef must be set
+                vars:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                enabled:
+                  type: boolean
+                  default: true
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - message
+                      - lastTransitionTime
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
