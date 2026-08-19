@@ -10,11 +10,13 @@
     "test": "bun run --filter '*' test",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "crds:generate": "bun run --filter schemas generate",
+    "crds:generate": "bun run --filter '@a5e/schemas' generate",
     "crds:apply": "kubectl apply -k crds/",
-    "dev:operator": "bun run --filter operator dev",
-    "dev:api": "bun run --filter api dev",
-    "dev:ui": "bun run --filter ui dev",
+    "dev:operator": "bun run --filter '@a5e/operator' dev",
+    "dev:api": "bun run --filter '@a5e/api' dev",
+    "dev:ui": "bun run --filter '@a5e/ui' dev",
+    "docs:dev": "bun run --filter '@a5e/docs' dev",
+    "docs:build": "bun run --filter '@a5e/docs' build",
     "seed": "bun run scripts/seed-fixtures.ts"
   },
   "dependencies": {

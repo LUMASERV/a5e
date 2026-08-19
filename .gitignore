@@ -9,6 +9,7 @@ build/
 bun.lockb
 .turbo/
 .dev-cluster-ca.crt
+.vitepress/cache/
 
 # Editor/IDE/AI-tool config — local to each contributor's setup, not part of the project itself.
 .claude/
