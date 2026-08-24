@@ -6,7 +6,7 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir ansible-core
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY packages/runner-image/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 RUN useradd -u 1000 -m runner

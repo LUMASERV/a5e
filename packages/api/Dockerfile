@@ -1,7 +1,7 @@
 FROM oven/bun:1 AS base
 WORKDIR /app
 
-COPY package.json bun.lock* bunfig.toml* ./
+COPY package.json bun.lock* bunfig.toml* tsconfig.base.json ./
 COPY packages/schemas/package.json packages/schemas/
 COPY packages/k8s-client/package.json packages/k8s-client/
 COPY packages/api/package.json packages/api/

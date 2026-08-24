@@ -42,7 +42,12 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
+          # Build context must be the repo root, not each package's own directory: every
+          # Dockerfile here except runner-image's COPYs sibling workspace packages
+          # (packages/schemas, packages/k8s-client) and the root package.json/bun.lock, which
+          # only exist outside a per-package context.
+          context: .
+          file: ${{ matrix.context }}/Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/public/a5e/${{ matrix.image }}:${{ steps.version.outputs.version }}
