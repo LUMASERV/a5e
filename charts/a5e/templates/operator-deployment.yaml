@@ -28,6 +28,11 @@ spec:
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
+        # See api-deployment.yaml's identical comment — packages/operator/Dockerfile's `USER bun`
+        # is a named user kubelet can't statically verify as non-root without this. 1000 is bun's
+        # actual UID/GID in the oven/bun base image.
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: operator
           image: {{ include "a5e.image" (list . .Values.operator.image) }}

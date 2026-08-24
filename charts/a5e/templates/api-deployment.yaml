@@ -25,6 +25,13 @@ spec:
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
+        # The image's `USER bun` (packages/api/Dockerfile) is a named user, not a numeric UID —
+        # kubelet can't statically verify a named user is non-root from image metadata alone, and
+        # refuses to start the container at all under runAsNonRoot without this ("container has
+        # runAsNonRoot and image has non-numeric user (bun), cannot verify user is non-root").
+        # 1000 is bun's actual UID/GID in the oven/bun base image.
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: api
           image: {{ include "a5e.image" (list . .Values.api.image) }}
