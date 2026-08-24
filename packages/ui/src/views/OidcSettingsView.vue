@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { onMounted, reactive, ref } from 'vue';
 import { apiClient } from '../api/client';
 
 interface OidcConfigResponse {

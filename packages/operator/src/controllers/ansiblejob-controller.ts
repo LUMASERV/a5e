@@ -1,4 +1,3 @@
-import { parseExpression } from 'cron-parser';
 import type { CustomResourceClient } from '@a5e/k8s-client';
 import { API_GROUP, API_GROUP_VERSION, RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type {
@@ -9,6 +8,7 @@ import type {
   CustomResource,
   ResourceDescriptor,
 } from '@a5e/schemas';
+import { parseExpression } from 'cron-parser';
 import { patchReadyCondition } from './base-reconciler';
 
 const JOB_LABEL = `${API_GROUP}/job`;
@@ -38,9 +38,14 @@ async function listOwnedRuns(
   namespace: string,
   jobName: string,
 ): Promise<CustomResource<AnsibleRunSpec, AnsibleRunStatus>[]> {
-  const result = await client.list<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(runDescriptor, 'self', namespace, {
-    labelSelector: `${JOB_LABEL}=${jobName}`,
-  });
+  const result = await client.list<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
+    runDescriptor,
+    'self',
+    namespace,
+    {
+      labelSelector: `${JOB_LABEL}=${jobName}`,
+    },
+  );
   return result.items;
 }
 
@@ -54,7 +59,11 @@ async function pruneHistory(
   const byPhase = (predicate: (phase: string | undefined) => boolean) =>
     runs
       .filter((r) => predicate(r.status?.phase))
-      .sort((a, b) => new Date(a.metadata.creationTimestamp ?? 0).getTime() - new Date(b.metadata.creationTimestamp ?? 0).getTime());
+      .sort(
+        (a, b) =>
+          new Date(a.metadata.creationTimestamp ?? 0).getTime() -
+          new Date(b.metadata.creationTimestamp ?? 0).getTime(),
+      );
 
   const succeeded = byPhase((p) => p === 'Succeeded');
   const failed = byPhase((p) => p !== undefined && TERMINAL_PHASES.has(p) && p !== 'Succeeded');
@@ -114,11 +123,20 @@ export async function reconcileAnsibleJobs(
     try {
       dueSince = mostRecentFireTime(obj.spec.schedule, new Date());
     } catch (err) {
-      await patchReadyCondition(client, descriptor, obj, false, 'InvalidSchedule', (err as Error).message);
+      await patchReadyCondition(
+        client,
+        descriptor,
+        obj,
+        false,
+        'InvalidSchedule',
+        (err as Error).message,
+      );
       return;
     }
 
-    const lastScheduleTime = obj.status?.lastScheduleTime ? new Date(obj.status.lastScheduleTime) : new Date(obj.metadata.creationTimestamp!);
+    const lastScheduleTime = obj.status?.lastScheduleTime
+      ? new Date(obj.status.lastScheduleTime)
+      : new Date(obj.metadata.creationTimestamp!);
     const due = dueSince > lastScheduleTime;
 
     if (due && !obj.spec.suspend) {
@@ -129,11 +147,23 @@ export async function reconcileAnsibleJobs(
       if (activeRuns.length > 0 && obj.spec.concurrencyPolicy === 'Forbid') {
         // Skip this tick's occurrence entirely — still advance lastScheduleTime so it isn't
         // re-evaluated (and re-skipped) forever once the active run finally finishes.
-        await client.patchStatus(descriptor, obj.metadata.name, { lastScheduleTime: new Date().toISOString() }, 'self', namespace);
+        await client.patchStatus(
+          descriptor,
+          obj.metadata.name,
+          { lastScheduleTime: new Date().toISOString() },
+          'self',
+          namespace,
+        );
       } else {
         if (activeRuns.length > 0 && obj.spec.concurrencyPolicy === 'Replace') {
           for (const run of activeRuns) {
-            await client.patch(runDescriptor, run.metadata.name, { spec: { cancel: true } }, 'self', namespace);
+            await client.patch(
+              runDescriptor,
+              run.metadata.name,
+              { spec: { cancel: true } },
+              'self',
+              namespace,
+            );
           }
         }
         const runName = await spawnRun(client, obj);
@@ -149,9 +179,30 @@ export async function reconcileAnsibleJobs(
   }
 
   const allRuns = await listOwnedRuns(client, namespace, obj.metadata.name);
-  await pruneHistory(client, namespace, allRuns, obj.spec.successfulRunsHistoryLimit, obj.spec.failedRunsHistoryLimit);
+  await pruneHistory(
+    client,
+    namespace,
+    allRuns,
+    obj.spec.successfulRunsHistoryLimit,
+    obj.spec.failedRunsHistoryLimit,
+  );
 
-  const active = allRuns.filter((r) => ACTIVE_PHASES.has(r.status?.phase ?? 'Pending')).map((r) => ({ name: r.metadata.name }));
-  await client.patchStatus(descriptor, obj.metadata.name, { active, observedGeneration: obj.metadata.generation }, 'self', namespace);
-  await patchReadyCondition(client, descriptor, { ...obj, status: { ...obj.status, active } }, true, 'Ready', 'job is valid');
+  const active = allRuns
+    .filter((r) => ACTIVE_PHASES.has(r.status?.phase ?? 'Pending'))
+    .map((r) => ({ name: r.metadata.name }));
+  await client.patchStatus(
+    descriptor,
+    obj.metadata.name,
+    { active, observedGeneration: obj.metadata.generation },
+    'self',
+    namespace,
+  );
+  await patchReadyCondition(
+    client,
+    descriptor,
+    { ...obj, status: { ...obj.status, active } },
+    true,
+    'Ready',
+    'job is valid',
+  );
 }

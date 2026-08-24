@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawnSync } from 'node:child_process';
 /**
  * Local dev convenience script (plan §6): seeds a sample AnsibleHost, AnsibleInventory, an
  * inline "hello world" AnsiblePlaybook, and an AnsibleSSHKey (from a throwaway generated
@@ -14,7 +15,6 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 
 // Persistent (gitignored) location for the extracted cluster CA — a tmpdir would get cleaned
@@ -58,7 +58,14 @@ metadata: { name: a5e-dev-impersonate-user }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin }
 subjects: [{ kind: User, name: dev@local }]
 `);
-const token = run('kubectl', ['create', 'token', 'a5e-dev', '-n', NAMESPACE, '--duration=24h']).trim();
+const token = run('kubectl', [
+  'create',
+  'token',
+  'a5e-dev',
+  '-n',
+  NAMESPACE,
+  '--duration=24h',
+]).trim();
 const caData = run('kubectl', [
   'config',
   'view',

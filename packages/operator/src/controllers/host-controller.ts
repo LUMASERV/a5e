@@ -1,7 +1,12 @@
 import type { CustomResourceClient } from '@a5e/k8s-client';
-import type { AnsibleHostSpec, AnsibleHostStatus, CustomResource, ResourceDescriptor } from '@a5e/schemas';
-import { patchReadyCondition } from './base-reconciler';
+import type {
+  AnsibleHostSpec,
+  AnsibleHostStatus,
+  CustomResource,
+  ResourceDescriptor,
+} from '@a5e/schemas';
 import { resolveRef } from '../resolvers/object-ref';
+import { patchReadyCondition } from './base-reconciler';
 
 /**
  * AnsibleHost/ClusterAnsibleHost have no external system to reconcile against — this is

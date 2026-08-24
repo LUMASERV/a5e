@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
 import {
-  Monitor,
-  Files,
-  Document,
-  Key,
-  VideoPlay,
-  Timer,
-  Setting,
-  Odometer,
   Connection,
+  Document,
+  Files,
+  Key,
+  Monitor,
+  Odometer,
+  Setting,
+  Timer,
+  VideoPlay,
 } from '@element-plus/icons-vue';
+import { onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useNamespaceStore } from '../stores/namespace';
 

@@ -35,7 +35,9 @@ export function resolveSession(token: unknown): Session | null {
  * an explicit header sidesteps both: it's never sent automatically by the browser, so a
  * cross-origin page can't trigger authenticated requests just by getting a victim to load it —
  * the token has to be deliberately attached by this app's own JS. */
-export function extractBearerToken(headers: Record<string, string | undefined>): string | undefined {
+export function extractBearerToken(
+  headers: Record<string, string | undefined>,
+): string | undefined {
   const value = headers.authorization ?? headers.Authorization;
   if (!value?.startsWith('Bearer ')) return undefined;
   return value.slice('Bearer '.length).trim() || undefined;

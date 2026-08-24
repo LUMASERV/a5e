@@ -1,5 +1,5 @@
-import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
+import { computed, ref } from 'vue';
 import { apiClient, apiUrl } from '../api/client';
 import { setToken } from '../api/token';
 
@@ -33,7 +33,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function localLogin(username: string, password: string) {
-    const { token } = await apiClient.post<{ token: string }>('/auth/local-login', { username, password });
+    const { token } = await apiClient.post<{ token: string }>('/auth/local-login', {
+      username,
+      password,
+    });
     setToken(token);
     await check();
   }

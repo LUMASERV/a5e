@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import YAML from 'yaml';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleJobSpec } from '@a5e/schemas';
+import { ElMessage } from 'element-plus';
+import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import YAML from 'yaml';
+import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useJobStore } from '../../stores/resources';
-import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 
 const props = defineProps<{ namespace?: string; name?: string }>();
 const router = useRouter();
@@ -36,7 +36,9 @@ onMounted(async () => {
   if (isEdit && props.namespace && props.name) {
     const existing = await store.get(props.name, props.namespace);
     form.spec = existing.spec;
-    extraVarsText.value = existing.spec.template.extraVars ? YAML.stringify(existing.spec.template.extraVars) : '';
+    extraVarsText.value = existing.spec.template.extraVars
+      ? YAML.stringify(existing.spec.template.extraVars)
+      : '';
   }
 });
 

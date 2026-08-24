@@ -33,7 +33,10 @@ export class CoreResources {
     }
   }
 
-  async createOrUpdateConfigMap(namespace: string, configMap: k8s.V1ConfigMap): Promise<k8s.V1ConfigMap> {
+  async createOrUpdateConfigMap(
+    namespace: string,
+    configMap: k8s.V1ConfigMap,
+  ): Promise<k8s.V1ConfigMap> {
     const name = configMap.metadata?.name;
     if (!name) throw new Error('configMap.metadata.name is required');
     try {
@@ -84,6 +87,11 @@ export class CoreResources {
 
   /** Full (non-streaming) pod log capture — used post-completion, not for live-follow. */
   async getPodLog(namespace: string, podName: string, container: string): Promise<string> {
-    return this.core.readNamespacedPodLog({ name: podName, namespace, container, timestamps: true });
+    return this.core.readNamespacedPodLog({
+      name: podName,
+      namespace,
+      container,
+      timestamps: true,
+    });
   }
 }

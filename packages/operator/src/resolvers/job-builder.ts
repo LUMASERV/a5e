@@ -1,6 +1,6 @@
-import type * as k8s from '@kubernetes/client-node';
 import { API_GROUP, API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleOptions } from '@a5e/schemas';
+import type * as k8s from '@kubernetes/client-node';
 
 export interface GitSource {
   url: string;
@@ -79,8 +79,15 @@ export function buildJobSpec(input: JobBuildInput): k8s.V1Job {
   ];
   for (const mount of input.sshKeyMounts) {
     const volumeName = `ssh-key-${mount.mountName}`;
-    volumes.push({ name: volumeName, secret: { secretName: mount.secretName, defaultMode: 0o640 } });
-    mainVolumeMounts.push({ name: volumeName, mountPath: `/ssh-keys/${mount.mountName}`, readOnly: true });
+    volumes.push({
+      name: volumeName,
+      secret: { secretName: mount.secretName, defaultMode: 0o640 },
+    });
+    mainVolumeMounts.push({
+      name: volumeName,
+      mountPath: `/ssh-keys/${mount.mountName}`,
+      readOnly: true,
+    });
   }
 
   let playbookDir: string;
@@ -104,7 +111,11 @@ export function buildJobSpec(input: JobBuildInput): k8s.V1Job {
         secret: { secretName: input.gitSource.basicAuthSecretName, defaultMode: 0o640 },
       });
       gitEnv.push({ name: 'GIT_HTTP_AUTH_PATH', value: '/git-basic-auth' });
-      gitVolumeMounts.push({ name: 'git-basic-auth', mountPath: '/git-basic-auth', readOnly: true });
+      gitVolumeMounts.push({
+        name: 'git-basic-auth',
+        mountPath: '/git-basic-auth',
+        readOnly: true,
+      });
     }
 
     initContainers.push({

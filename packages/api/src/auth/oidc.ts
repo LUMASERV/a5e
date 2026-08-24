@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { readOidcConfigSecret } from '../lib/oidc-config-store';
 
@@ -155,7 +155,10 @@ export interface VerifiedIdentity {
   claims: Record<string, unknown>;
 }
 
-export async function verifyIdToken(config: OidcConfig, idToken: string): Promise<VerifiedIdentity> {
+export async function verifyIdToken(
+  config: OidcConfig,
+  idToken: string,
+): Promise<VerifiedIdentity> {
   const doc = await discover(config);
   let jwks = jwksCache.get(config.issuer);
   if (!jwks) {

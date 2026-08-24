@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { AnsiUp } from 'ansi_up';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleRunSpec, AnsibleRunStatus, CustomResource } from '@a5e/schemas';
+import { AnsiUp } from 'ansi_up';
+import { ElMessage } from 'element-plus';
+import { nextTick, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { apiClient, downloadFile } from '../../api/client';
 import { resourceBasePath } from '../../api/resource-path';
 import { watchLogs, watchResource } from '../../api/watch';
@@ -32,7 +32,8 @@ function phaseType(phase?: string): 'success' | 'danger' | 'warning' | 'info' {
   if (phase === 'Running' || phase === 'Resolving') return 'warning';
   return 'info';
 }
-const isTerminal = (phase?: string) => ['Succeeded', 'Failed', 'Error', 'Cancelled'].includes(phase ?? '');
+const isTerminal = (phase?: string) =>
+  ['Succeeded', 'Failed', 'Error', 'Cancelled'].includes(phase ?? '');
 
 const EDIT_ROUTE: Record<string, (name: string, namespace: string) => string> = {
   AnsiblePlaybook: (name, ns) => `/playbooks/${ns}/${name}/edit`,
@@ -41,7 +42,10 @@ const EDIT_ROUTE: Record<string, (name: string, namespace: string) => string> = 
   ClusterAnsibleInventory: (name) => `/cluster-inventories/${name}/edit`,
 };
 
-function refRoute(ref: { kind: string; name: string; namespace?: string }, ownNamespace: string): string {
+function refRoute(
+  ref: { kind: string; name: string; namespace?: string },
+  ownNamespace: string,
+): string {
   const descriptor = RESOURCE_DESCRIPTORS_BY_KIND[ref.kind];
   const namespace = ref.namespace ?? (descriptor?.scope === 'Namespaced' ? ownNamespace : '');
   return EDIT_ROUTE[ref.kind]?.(ref.name, namespace) ?? '/';
@@ -98,7 +102,10 @@ async function retry() {
 }
 async function downloadLogs() {
   try {
-    await downloadFile(`/namespaces/${props.namespace}/ansibleruns/${props.name}/logs/download`, `${props.name}.log`);
+    await downloadFile(
+      `/namespaces/${props.namespace}/ansibleruns/${props.name}/logs/download`,
+      `${props.name}.log`,
+    );
   } catch (err) {
     ElMessage.error((err as Error).message);
   }

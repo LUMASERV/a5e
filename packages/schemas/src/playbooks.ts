@@ -35,13 +35,15 @@ export const playbookSourceSchema = z.object({
 export type PlaybookSource = z.infer<typeof playbookSourceSchema>;
 
 export const PLAYBOOK_SOURCE_CEL =
-  "(has(self.inline)?1:0) + (has(self.configMapRef)?1:0) + (has(self.git)?1:0) == 1";
+  '(has(self.inline)?1:0) + (has(self.configMapRef)?1:0) + (has(self.git)?1:0) == 1';
 export const PLAYBOOK_SOURCE_CEL_MESSAGE =
   'exactly one of source.inline, source.configMapRef, source.git must be set';
 
 /** A git source needs at most one auth method — public repos need neither. */
-export const GIT_AUTH_CEL = '(has(self.sshKeySecretRef)?1:0) + (has(self.basicAuthSecretRef)?1:0) <= 1';
-export const GIT_AUTH_CEL_MESSAGE = 'at most one of source.git.sshKeySecretRef or source.git.basicAuthSecretRef may be set';
+export const GIT_AUTH_CEL =
+  '(has(self.sshKeySecretRef)?1:0) + (has(self.basicAuthSecretRef)?1:0) <= 1';
+export const GIT_AUTH_CEL_MESSAGE =
+  'at most one of source.git.sshKeySecretRef or source.git.basicAuthSecretRef may be set';
 
 export const ansiblePlaybookSpecSchema = z.object({
   source: playbookSourceSchema,

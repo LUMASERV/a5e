@@ -1,5 +1,10 @@
-import { resolveRefNamespace, type CustomResourceClient } from '@a5e/k8s-client';
-import type { AnsiblePlaybookSpec, AnsiblePlaybookStatus, CustomResource, ResourceDescriptor } from '@a5e/schemas';
+import { type CustomResourceClient, resolveRefNamespace } from '@a5e/k8s-client';
+import type {
+  AnsiblePlaybookSpec,
+  AnsiblePlaybookStatus,
+  CustomResource,
+  ResourceDescriptor,
+} from '@a5e/schemas';
 import type { CoreResources } from '../k8s/core';
 import { patchReadyCondition } from './base-reconciler';
 
@@ -30,11 +35,25 @@ export async function reconcilePlaybook(
     try {
       namespace = resolveRefNamespace('Namespaced', source.configMapRef.namespace, ownerNamespace);
     } catch (err) {
-      await patchReadyCondition(client, descriptor, obj, false, 'ConfigMapNotFound', (err as Error).message);
+      await patchReadyCondition(
+        client,
+        descriptor,
+        obj,
+        false,
+        'ConfigMapNotFound',
+        (err as Error).message,
+      );
       return;
     }
     if (!namespace) {
-      await patchReadyCondition(client, descriptor, obj, false, 'ConfigMapNotFound', 'no namespace resolvable for source.configMapRef');
+      await patchReadyCondition(
+        client,
+        descriptor,
+        obj,
+        false,
+        'ConfigMapNotFound',
+        'no namespace resolvable for source.configMapRef',
+      );
       return;
     }
     try {
@@ -58,11 +77,25 @@ export async function reconcilePlaybook(
     try {
       namespace = resolveRefNamespace('Namespaced', gitAuthRef.namespace, ownerNamespace);
     } catch (err) {
-      await patchReadyCondition(client, descriptor, obj, false, 'SecretNotFound', (err as Error).message);
+      await patchReadyCondition(
+        client,
+        descriptor,
+        obj,
+        false,
+        'SecretNotFound',
+        (err as Error).message,
+      );
       return;
     }
     if (!namespace) {
-      await patchReadyCondition(client, descriptor, obj, false, 'SecretNotFound', 'no namespace resolvable for source.git auth secretRef');
+      await patchReadyCondition(
+        client,
+        descriptor,
+        obj,
+        false,
+        'SecretNotFound',
+        'no namespace resolvable for source.git auth secretRef',
+      );
       return;
     }
     try {

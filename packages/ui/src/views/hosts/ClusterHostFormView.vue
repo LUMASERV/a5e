@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleHostSpec } from '@a5e/schemas';
-import { useClusterHostStore } from '../../stores/resources';
-import { useNamespaceStore } from '../../stores/namespace';
+import { ElMessage } from 'element-plus';
+import { onMounted, reactive } from 'vue';
+import { useRouter } from 'vue-router';
 import JumpHostEditor from '../../components/JumpHostEditor.vue';
 import LabelsEditor from '../../components/LabelsEditor.vue';
 import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 import VarsEditor from '../../components/VarsEditor.vue';
+import { useNamespaceStore } from '../../stores/namespace';
+import { useClusterHostStore } from '../../stores/resources';
 
 const props = defineProps<{ name?: string }>();
 const router = useRouter();
@@ -17,7 +17,11 @@ const store = useClusterHostStore();
 const namespaceStore = useNamespaceStore();
 
 const isEdit = Boolean(props.name);
-const form = reactive<{ name: string; labels: Record<string, string> | undefined; spec: AnsibleHostSpec }>({
+const form = reactive<{
+  name: string;
+  labels: Record<string, string> | undefined;
+  spec: AnsibleHostSpec;
+}>({
   name: props.name ?? '',
   labels: undefined,
   spec: { ansiblePort: 22, ansibleUser: 'root', enabled: true },
@@ -32,11 +36,18 @@ onMounted(async () => {
 });
 
 async function save() {
-  const spec = { ...form.spec, sshKeyRef: form.spec.sshKeyRef?.name ? form.spec.sshKeyRef : undefined };
+  const spec = {
+    ...form.spec,
+    sshKeyRef: form.spec.sshKeyRef?.name ? form.spec.sshKeyRef : undefined,
+  };
   try {
     if (isEdit) {
       const existing = await store.get(form.name);
-      await store.update(form.name, { ...existing, metadata: { ...existing.metadata, labels: form.labels }, spec });
+      await store.update(form.name, {
+        ...existing,
+        metadata: { ...existing.metadata, labels: form.labels },
+        spec,
+      });
     } else {
       await store.create({
         apiVersion: API_GROUP_VERSION,

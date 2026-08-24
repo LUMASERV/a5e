@@ -1,9 +1,9 @@
 <script setup lang="ts">
+import type { CustomResource } from '@a5e/schemas';
+import { Search } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search } from '@element-plus/icons-vue';
-import type { CustomResource } from '@a5e/schemas';
 
 const props = defineProps<{
   title: string;
@@ -40,7 +40,10 @@ function parseLabelFilter(text: string): Array<[string, string | null]> {
     });
 }
 
-function matchesLabelFilter(item: CustomResource<unknown, unknown>, pairs: Array<[string, string | null]>): boolean {
+function matchesLabelFilter(
+  item: CustomResource<unknown, unknown>,
+  pairs: Array<[string, string | null]>,
+): boolean {
   if (pairs.length === 0) return true;
   const labels = item.metadata.labels ?? {};
   return pairs.every(([key, value]) => (value === null ? key in labels : labels[key] === value));
@@ -56,11 +59,18 @@ const rows = computed(() => {
     .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
 });
 
-function readyStatus(item: CustomResource<unknown, unknown>): { text: string; type: 'success' | 'danger' | 'info' } {
-  const status = item.status as { conditions?: Array<{ type: string; status: string; reason: string }> } | undefined;
+function readyStatus(item: CustomResource<unknown, unknown>): {
+  text: string;
+  type: 'success' | 'danger' | 'info';
+} {
+  const status = item.status as
+    | { conditions?: Array<{ type: string; status: string; reason: string }> }
+    | undefined;
   const ready = status?.conditions?.find((c) => c.type === 'Ready');
   if (!ready) return { text: 'Unknown', type: 'info' };
-  return ready.status === 'True' ? { text: 'Ready', type: 'success' } : { text: ready.reason, type: 'danger' };
+  return ready.status === 'True'
+    ? { text: 'Ready', type: 'success' }
+    : { text: ready.reason, type: 'danger' };
 }
 
 async function reload() {

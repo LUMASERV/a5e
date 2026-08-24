@@ -1,5 +1,5 @@
-import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { CustomResourceClient } from '@a5e/k8s-client';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type {
@@ -18,17 +18,17 @@ import type {
   ClusterAnsibleSSHKeySpec,
   CustomResource,
 } from '@a5e/schemas';
-import { createKubeConfig } from './k8s/client';
-import { CoreResources } from './k8s/core';
-import { CronTicker } from './k8s/cron-ticker';
-import { type Controller, ResourceController } from './k8s/informer';
-import { runWithLeaderElection } from './k8s/leader-election';
 import { reconcileAnsibleJobs } from './controllers/ansiblejob-controller';
 import { reconcileHost } from './controllers/host-controller';
 import { reconcileInventory } from './controllers/inventory-controller';
 import { reconcilePlaybook } from './controllers/playbook-controller';
 import { reconcileRun } from './controllers/run-controller';
 import { reconcileSSHKey } from './controllers/sshkey-controller';
+import { createKubeConfig } from './k8s/client';
+import { CoreResources } from './k8s/core';
+import { CronTicker } from './k8s/cron-ticker';
+import { type Controller, ResourceController } from './k8s/informer';
+import { runWithLeaderElection } from './k8s/leader-election';
 import { resolveGlobalS3Config } from './s3/uploader';
 
 async function startControllers(): Promise<Controller[]> {
@@ -65,8 +65,11 @@ async function startControllers(): Promise<Controller[]> {
   for (const kind of ['AnsiblePlaybook', 'ClusterAnsiblePlaybook'] as const) {
     const descriptor = RESOURCE_DESCRIPTORS_BY_KIND[kind]!;
     controllers.push(
-      new ResourceController<AnsiblePlaybookSpec, AnsiblePlaybookStatus>(kc, client, descriptor, (obj) =>
-        reconcilePlaybook(client, core, descriptor, obj),
+      new ResourceController<AnsiblePlaybookSpec, AnsiblePlaybookStatus>(
+        kc,
+        client,
+        descriptor,
+        (obj) => reconcilePlaybook(client, core, descriptor, obj),
       ),
     );
   }
@@ -75,8 +78,11 @@ async function startControllers(): Promise<Controller[]> {
   for (const kind of ['AnsibleInventory', 'ClusterAnsibleInventory'] as const) {
     const descriptor = RESOURCE_DESCRIPTORS_BY_KIND[kind]!;
     controllers.push(
-      new ResourceController<AnsibleInventorySpec, AnsibleInventoryStatus>(kc, client, descriptor, (obj) =>
-        reconcileInventory(client, descriptor, obj),
+      new ResourceController<AnsibleInventorySpec, AnsibleInventoryStatus>(
+        kc,
+        client,
+        descriptor,
+        (obj) => reconcileInventory(client, descriptor, obj),
       ),
     );
   }
@@ -85,7 +91,9 @@ async function startControllers(): Promise<Controller[]> {
   const runnerImage = process.env.RUNNER_IMAGE ?? 'a5e-runner:dev';
   const s3Config = resolveGlobalS3Config();
   if (!s3Config) {
-    console.log('no global S3 config found (S3_BUCKET/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY) — run logs stay pod-only');
+    console.log(
+      'no global S3 config found (S3_BUCKET/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY) — run logs stay pod-only',
+    );
   }
   {
     const descriptor = RESOURCE_DESCRIPTORS_BY_KIND.AnsibleRun!;
@@ -103,7 +111,11 @@ async function startControllers(): Promise<Controller[]> {
     const descriptor = RESOURCE_DESCRIPTORS_BY_KIND.AnsibleJob!;
     controllers.push(
       new CronTicker(client, descriptor, (obj) =>
-        reconcileAnsibleJobs(client, descriptor, obj as CustomResource<AnsibleJobSpec, AnsibleJobStatus>),
+        reconcileAnsibleJobs(
+          client,
+          descriptor,
+          obj as CustomResource<AnsibleJobSpec, AnsibleJobStatus>,
+        ),
       ),
     );
   }

@@ -12,6 +12,7 @@ import {
   clusterAnsibleInventorySpecSchema,
   clusterAnsibleInventoryStatusSchema,
 } from './inventories';
+import { ansibleJobSpecSchema, ansibleJobStatusSchema } from './jobs';
 import {
   ansiblePlaybookSpecSchema,
   ansiblePlaybookStatusSchema,
@@ -19,7 +20,6 @@ import {
   clusterAnsiblePlaybookStatusSchema,
 } from './playbooks';
 import { ansibleRunSpecSchema, ansibleRunStatusSchema } from './runs';
-import { ansibleJobSpecSchema, ansibleJobStatusSchema } from './jobs';
 import {
   ansibleSSHKeySpecSchema,
   ansibleSSHKeyStatusSchema,

@@ -8,7 +8,11 @@ import { apiUrl, authHeaders } from './client';
  * (frames separated by a blank line, `event:`/`data:` fields) — the same trade-off the original
  * plan flagged as the fallback bearer-auth would require.
  */
-async function consumeSse(path: string, onEvent: (event: string, data: string) => void, signal: AbortSignal): Promise<void> {
+async function consumeSse(
+  path: string,
+  onEvent: (event: string, data: string) => void,
+  signal: AbortSignal,
+): Promise<void> {
   const res = await fetch(apiUrl(path), { headers: authHeaders(), signal });
   if (!res.ok || !res.body) return;
 
@@ -20,8 +24,9 @@ async function consumeSse(path: string, onEvent: (event: string, data: string) =
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    let frameEnd: number;
-    while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
+    while (true) {
+      const frameEnd = buffer.indexOf('\n\n');
+      if (frameEnd === -1) break;
       const frame = buffer.slice(0, frameEnd);
       buffer = buffer.slice(frameEnd + 2);
 
@@ -59,7 +64,11 @@ export function watchResource(
   return () => controller.abort();
 }
 
-export function watchLogs(path: string, onLine: (line: string) => void, onError?: (message: string) => void): () => void {
+export function watchLogs(
+  path: string,
+  onLine: (line: string) => void,
+  onError?: (message: string) => void,
+): () => void {
   const controller = new AbortController();
   consumeSse(
     path,

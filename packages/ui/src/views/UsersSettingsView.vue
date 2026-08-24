@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { onMounted, reactive, ref } from 'vue';
 import { apiClient } from '../api/client';
 
 interface AppUser {
@@ -18,7 +18,14 @@ const users = ref<AppUser[]>([]);
 const loading = ref(true);
 const creating = ref(false);
 
-const form = reactive({ username: '', password: '', email: '', displayName: '', groupsText: '', role: 'user' });
+const form = reactive({
+  username: '',
+  password: '',
+  email: '',
+  displayName: '',
+  groupsText: '',
+  role: 'user',
+});
 
 async function load() {
   loading.value = true;
@@ -50,7 +57,14 @@ async function create() {
         .filter(Boolean),
       role: form.role,
     });
-    Object.assign(form, { username: '', password: '', email: '', displayName: '', groupsText: '', role: 'user' });
+    Object.assign(form, {
+      username: '',
+      password: '',
+      email: '',
+      displayName: '',
+      groupsText: '',
+      role: 'user',
+    });
     ElMessage.success('Created');
     await load();
   } catch (err) {

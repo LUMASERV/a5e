@@ -1,8 +1,11 @@
-import { resolveRole, roleAtLeast, type AppRole } from './roles';
-import { resolveSession, type Session } from './session';
+import { type AppRole, resolveRole, roleAtLeast } from './roles';
+import { type Session, resolveSession } from './session';
 
 function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 /**
@@ -22,7 +25,10 @@ export async function authorize(
   const role = await resolveRole(session);
   if (!roleAtLeast(role, min)) {
     return jsonResponse(403, {
-      error: role === 'none' ? 'no role assigned yet — ask an admin to grant you access' : `requires the "${min}" role`,
+      error:
+        role === 'none'
+          ? 'no role assigned yet — ask an admin to grant you access'
+          : `requires the "${min}" role`,
     });
   }
   return { session };

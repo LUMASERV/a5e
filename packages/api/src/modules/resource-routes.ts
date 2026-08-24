@@ -1,10 +1,10 @@
 import type { ResourceDescriptor } from '@a5e/schemas';
-import { client, kc } from '../plugins/k8s';
 import { authorize } from '../auth/authorize';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
-import { WatchHub } from '../lib/watch-hub';
 import { sseResponse } from '../lib/sse';
+import { WatchHub } from '../lib/watch-hub';
+import { client, kc } from '../plugins/k8s';
 
 const watchHub = new WatchHub(kc, client);
 
@@ -62,7 +62,12 @@ export function registerResourceRoutes(app: AnyElysia, descriptor: ResourceDescr
       const auth = await authorize(extractBearerToken(headers), 'user');
       if (auth instanceof Response) return auth;
       const p = params as Record<string, string>;
-      return client.get(descriptor, p.name!, auth.session.identity, isNamespaced ? p.namespace : undefined);
+      return client.get(
+        descriptor,
+        p.name!,
+        auth.session.identity,
+        isNamespaced ? p.namespace : undefined,
+      );
     })
 
     .post(basePath, async ({ params, body, headers, set }) => {
@@ -77,21 +82,38 @@ export function registerResourceRoutes(app: AnyElysia, descriptor: ResourceDescr
       const auth = await authorize(extractBearerToken(headers), 'user');
       if (auth instanceof Response) return auth;
       const p = params as Record<string, string>;
-      return client.replace(descriptor, p.name!, body, auth.session.identity, isNamespaced ? p.namespace : undefined);
+      return client.replace(
+        descriptor,
+        p.name!,
+        body,
+        auth.session.identity,
+        isNamespaced ? p.namespace : undefined,
+      );
     })
 
     .patch(`${basePath}/:name`, async ({ params, body, headers }) => {
       const auth = await authorize(extractBearerToken(headers), 'user');
       if (auth instanceof Response) return auth;
       const p = params as Record<string, string>;
-      return client.patch(descriptor, p.name!, body, auth.session.identity, isNamespaced ? p.namespace : undefined);
+      return client.patch(
+        descriptor,
+        p.name!,
+        body,
+        auth.session.identity,
+        isNamespaced ? p.namespace : undefined,
+      );
     })
 
     .delete(`${basePath}/:name`, async ({ params, headers, set }) => {
       const auth = await authorize(extractBearerToken(headers), 'user');
       if (auth instanceof Response) return auth;
       const p = params as Record<string, string>;
-      await client.delete(descriptor, p.name!, auth.session.identity, isNamespaced ? p.namespace : undefined);
+      await client.delete(
+        descriptor,
+        p.name!,
+        auth.session.identity,
+        isNamespaced ? p.namespace : undefined,
+      );
       set.status = 204;
     });
 }

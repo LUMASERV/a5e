@@ -18,7 +18,10 @@ function hopToSshTarget(hop: JumpChainHop): string {
  * the exact text handed to `ansible-playbook -i`. INI over YAML for broadest `ansible-playbook`
  * compatibility (plan §3.4).
  */
-export function renderInventoryIni(topLevelVars: Record<string, unknown> | undefined, groups: ResolvedGroup[]): string {
+export function renderInventoryIni(
+  topLevelVars: Record<string, unknown> | undefined,
+  groups: ResolvedGroup[],
+): string {
   const lines: string[] = [];
 
   for (const group of groups) {
@@ -28,13 +31,16 @@ export function renderInventoryIni(topLevelVars: Record<string, unknown> | undef
       const address = host.spec.ansibleAddress ?? host.spec.ansibleHost ?? host.name;
       const parts = [`ansible_host=${formatIniValue(address)}`];
       if (host.spec.ansiblePort !== undefined) parts.push(`ansible_port=${host.spec.ansiblePort}`);
-      if (host.spec.ansibleUser) parts.push(`ansible_user=${formatIniValue(host.spec.ansibleUser)}`);
+      if (host.spec.ansibleUser)
+        parts.push(`ansible_user=${formatIniValue(host.spec.ansibleUser)}`);
       if (host.sshKeyMountName) {
         parts.push(`ansible_ssh_private_key_file=/ssh-keys/${host.sshKeyMountName}/ssh-privatekey`);
       }
       if (host.jumpChain?.length) {
         const proxyJump = host.jumpChain.map(hopToSshTarget).join(',');
-        parts.push(`ansible_ssh_common_args=${JSON.stringify(`-o StrictHostKeyChecking=accept-new -J ${proxyJump}`)}`);
+        parts.push(
+          `ansible_ssh_common_args=${JSON.stringify(`-o StrictHostKeyChecking=accept-new -J ${proxyJump}`)}`,
+        );
       }
       for (const [key, value] of Object.entries(host.spec.vars ?? {})) {
         parts.push(`${key}=${formatIniValue(value)}`);
@@ -45,7 +51,8 @@ export function renderInventoryIni(topLevelVars: Record<string, unknown> | undef
 
     if (group.vars && Object.keys(group.vars).length > 0) {
       lines.push(`[${group.name}:vars]`);
-      for (const [key, value] of Object.entries(group.vars)) lines.push(`${key}=${formatIniValue(value)}`);
+      for (const [key, value] of Object.entries(group.vars))
+        lines.push(`${key}=${formatIniValue(value)}`);
       lines.push('');
     }
 
@@ -58,7 +65,8 @@ export function renderInventoryIni(topLevelVars: Record<string, unknown> | undef
 
   if (topLevelVars && Object.keys(topLevelVars).length > 0) {
     lines.push('[all:vars]');
-    for (const [key, value] of Object.entries(topLevelVars)) lines.push(`${key}=${formatIniValue(value)}`);
+    for (const [key, value] of Object.entries(topLevelVars))
+      lines.push(`${key}=${formatIniValue(value)}`);
     lines.push('');
   }
 

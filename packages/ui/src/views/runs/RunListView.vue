@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import type { AnsibleRunSpec, AnsibleRunStatus, CustomResource } from '@a5e/schemas';
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import type { AnsibleRunSpec, AnsibleRunStatus, CustomResource } from '@a5e/schemas';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useRunStore } from '../../stores/resources';
 
@@ -11,7 +11,9 @@ const store = useRunStore();
 
 const rows = computed(() =>
   Array.from(store.items.values()).sort(
-    (a, b) => new Date(b.metadata.creationTimestamp ?? 0).getTime() - new Date(a.metadata.creationTimestamp ?? 0).getTime(),
+    (a, b) =>
+      new Date(b.metadata.creationTimestamp ?? 0).getTime() -
+      new Date(a.metadata.creationTimestamp ?? 0).getTime(),
   ),
 );
 

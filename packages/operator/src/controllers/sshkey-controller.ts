@@ -1,5 +1,4 @@
-import sshpk from 'sshpk';
-import { resolveRefNamespace, type CustomResourceClient } from '@a5e/k8s-client';
+import { type CustomResourceClient, resolveRefNamespace } from '@a5e/k8s-client';
 import type {
   AnsibleSSHKeySpec,
   AnsibleSSHKeyStatus,
@@ -7,10 +6,14 @@ import type {
   CustomResource,
   ResourceDescriptor,
 } from '@a5e/schemas';
+import sshpk from 'sshpk';
 import type { CoreResources } from '../k8s/core';
 import { patchReadyCondition } from './base-reconciler';
 
-function decodeSecretValue(data: Record<string, string> | undefined, key: string): Buffer | undefined {
+function decodeSecretValue(
+  data: Record<string, string> | undefined,
+  key: string,
+): Buffer | undefined {
   const value = data?.[key];
   return value ? Buffer.from(value, 'base64') : undefined;
 }
@@ -37,11 +40,25 @@ export async function reconcileSSHKey(
   try {
     namespace = resolveRefNamespace('Namespaced', secretRef.namespace, ownerNamespace);
   } catch (err) {
-    await patchReadyCondition(client, descriptor, obj, false, 'SecretNotFound', (err as Error).message);
+    await patchReadyCondition(
+      client,
+      descriptor,
+      obj,
+      false,
+      'SecretNotFound',
+      (err as Error).message,
+    );
     return;
   }
   if (!namespace) {
-    await patchReadyCondition(client, descriptor, obj, false, 'SecretNotFound', 'no namespace resolvable for secretRef');
+    await patchReadyCondition(
+      client,
+      descriptor,
+      obj,
+      false,
+      'SecretNotFound',
+      'no namespace resolvable for secretRef',
+    );
     return;
   }
 
@@ -77,15 +94,32 @@ export async function reconcileSSHKey(
   if (passphraseSecretRef) {
     let passphraseNamespace: string | undefined;
     try {
-      passphraseNamespace = resolveRefNamespace('Namespaced', passphraseSecretRef.namespace, ownerNamespace);
+      passphraseNamespace = resolveRefNamespace(
+        'Namespaced',
+        passphraseSecretRef.namespace,
+        ownerNamespace,
+      );
     } catch (err) {
-      await patchReadyCondition(client, descriptor, obj, false, 'SecretNotFound', (err as Error).message);
+      await patchReadyCondition(
+        client,
+        descriptor,
+        obj,
+        false,
+        'SecretNotFound',
+        (err as Error).message,
+      );
       return;
     }
     if (passphraseNamespace) {
       try {
-        const passphraseSecret = await core.getSecret(passphraseNamespace, passphraseSecretRef.name);
-        const raw = decodeSecretValue(passphraseSecret.data, passphraseSecretRef.key ?? 'passphrase');
+        const passphraseSecret = await core.getSecret(
+          passphraseNamespace,
+          passphraseSecretRef.name,
+        );
+        const raw = decodeSecretValue(
+          passphraseSecret.data,
+          passphraseSecretRef.key ?? 'passphrase',
+        );
         passphrase = raw?.toString('utf8');
       } catch {
         await patchReadyCondition(
@@ -124,7 +158,14 @@ export async function reconcileSSHKey(
     observedGeneration: obj.metadata.generation,
   };
   await client.patchStatus(descriptor, obj.metadata.name, status, 'self', obj.metadata.namespace);
-  await patchReadyCondition(client, descriptor, { ...obj, status }, true, 'Ready', 'public key derived');
+  await patchReadyCondition(
+    client,
+    descriptor,
+    { ...obj, status },
+    true,
+    'Ready',
+    'public key derived',
+  );
 }
 
 function normalizeKeyType(type: string): AnsibleSSHKeyStatus['keyType'] {

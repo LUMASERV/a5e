@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { useAuthStore } from '../stores/auth';
+import { onMounted, reactive, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { apiClient } from '../api/client';
+import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -32,7 +32,9 @@ onMounted(async () => {
     router.replace({ query: { ...route.query, error: undefined } });
   }
   try {
-    oidcConfigured.value = (await apiClient.get<{ configured: boolean }>('/auth/oidc-status')).configured;
+    oidcConfigured.value = (
+      await apiClient.get<{ configured: boolean }>('/auth/oidc-status')
+    ).configured;
   } catch {
     oidcConfigured.value = false;
   }

@@ -1,5 +1,5 @@
-import * as k8s from '@kubernetes/client-node';
 import { loadKubeConfig, loadKubeConfigFromToken } from '@a5e/k8s-client';
+import type * as k8s from '@kubernetes/client-node';
 
 /**
  * Local dev against OrbStack's default kubeconfig (mTLS) doesn't work under Bun (see
@@ -16,5 +16,7 @@ export function createKubeConfig(): k8s.KubeConfig {
       caFile: process.env.OPERATOR_KUBE_CA_FILE,
     });
   }
-  return loadKubeConfig({ mode: process.env.KUBERNETES_SERVICE_HOST ? 'in-cluster' : 'kubeconfig' });
+  return loadKubeConfig({
+    mode: process.env.KUBERNETES_SERVICE_HOST ? 'in-cluster' : 'kubeconfig',
+  });
 }

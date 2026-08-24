@@ -32,7 +32,10 @@ export async function runWithLeaderElection(
   async function tryAcquireOrRenew(): Promise<boolean> {
     let lease: k8s.V1Lease;
     try {
-      lease = await api.readNamespacedLease({ name: options.leaseName, namespace: options.namespace });
+      lease = await api.readNamespacedLease({
+        name: options.leaseName,
+        namespace: options.namespace,
+      });
     } catch (err) {
       if ((err as { code?: number }).code === 404) {
         try {

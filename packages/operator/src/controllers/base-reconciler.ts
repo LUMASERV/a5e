@@ -25,7 +25,8 @@ export async function patchReadyCondition<TSpec, TStatus extends { conditions?: 
     reason,
     message,
     observedGeneration: obj.metadata.generation,
-    lastTransitionTime: previousReady && previousReady.status === status ? previousReady.lastTransitionTime : now,
+    lastTransitionTime:
+      previousReady && previousReady.status === status ? previousReady.lastTransitionTime : now,
   };
 
   if (

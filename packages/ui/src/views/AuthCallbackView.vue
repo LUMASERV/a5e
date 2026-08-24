@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { Loading } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 import { onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { Loading } from '@element-plus/icons-vue';
-import { useAuthStore } from '../stores/auth';
 import { setToken } from '../api/token';
+import { useAuthStore } from '../stores/auth';
 
 const router = useRouter();
 const auth = useAuthStore();

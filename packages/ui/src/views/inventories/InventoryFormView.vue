@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleInventorySpec } from '@a5e/schemas';
+import { ElMessage } from 'element-plus';
+import { onMounted, reactive } from 'vue';
+import { useRouter } from 'vue-router';
+import HostSourceListEditor from '../../components/HostSourceListEditor.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useInventoryStore } from '../../stores/resources';
-import HostSourceListEditor from '../../components/HostSourceListEditor.vue';
 
 const props = defineProps<{ namespace?: string; name?: string }>();
 const router = useRouter();

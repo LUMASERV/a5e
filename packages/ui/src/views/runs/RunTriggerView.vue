@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import YAML from 'yaml';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleRunSpec } from '@a5e/schemas';
+import { ElMessage } from 'element-plus';
+import { reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import YAML from 'yaml';
+import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useRunStore } from '../../stores/resources';
-import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 
 const router = useRouter();
 const namespaceStore = useNamespaceStore();

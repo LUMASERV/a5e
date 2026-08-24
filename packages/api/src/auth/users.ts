@@ -32,7 +32,9 @@ export interface AppUser {
 
 export async function listUsers(): Promise<AppUser[]> {
   const [accounts, oidcEntries] = await Promise.all([listLocalAccounts(), listOidcUserRoles()]);
-  const linkedSubs = new Set(accounts.map((a) => a.linkedSub).filter((sub): sub is string => !!sub));
+  const linkedSubs = new Set(
+    accounts.map((a) => a.linkedSub).filter((sub): sub is string => !!sub),
+  );
 
   const local: AppUser[] = accounts.map((a) => ({
     id: `local:${a.username}`,

@@ -29,28 +29,28 @@ export const useInventoryStore = createResourceStore<AnsibleInventorySpec, Ansib
   'inventory',
   RESOURCE_DESCRIPTORS_BY_KIND.AnsibleInventory!,
 );
-export const useClusterInventoryStore = createResourceStore<AnsibleInventorySpec, AnsibleInventoryStatus>(
-  'clusterInventory',
-  RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsibleInventory!,
-);
+export const useClusterInventoryStore = createResourceStore<
+  AnsibleInventorySpec,
+  AnsibleInventoryStatus
+>('clusterInventory', RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsibleInventory!);
 
 export const usePlaybookStore = createResourceStore<AnsiblePlaybookSpec, AnsiblePlaybookStatus>(
   'playbook',
   RESOURCE_DESCRIPTORS_BY_KIND.AnsiblePlaybook!,
 );
-export const useClusterPlaybookStore = createResourceStore<AnsiblePlaybookSpec, AnsiblePlaybookStatus>(
-  'clusterPlaybook',
-  RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsiblePlaybook!,
-);
+export const useClusterPlaybookStore = createResourceStore<
+  AnsiblePlaybookSpec,
+  AnsiblePlaybookStatus
+>('clusterPlaybook', RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsiblePlaybook!);
 
 export const useSSHKeyStore = createResourceStore<AnsibleSSHKeySpec, AnsibleSSHKeyStatus>(
   'sshKey',
   RESOURCE_DESCRIPTORS_BY_KIND.AnsibleSSHKey!,
 );
-export const useClusterSSHKeyStore = createResourceStore<ClusterAnsibleSSHKeySpec, AnsibleSSHKeyStatus>(
-  'clusterSSHKey',
-  RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsibleSSHKey!,
-);
+export const useClusterSSHKeyStore = createResourceStore<
+  ClusterAnsibleSSHKeySpec,
+  AnsibleSSHKeyStatus
+>('clusterSSHKey', RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsibleSSHKey!);
 
 export const useRunStore = createResourceStore<AnsibleRunSpec, AnsibleRunStatus>(
   'run',

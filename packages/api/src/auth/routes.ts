@@ -1,4 +1,5 @@
 import type { AnyElysia } from '../lib/elysia-types';
+import { findAccountBySub, linkAccountToSub, verifyLocalLogin } from './local-accounts';
 import {
   buildAuthorizationUrl,
   endSessionUrl,
@@ -8,11 +9,16 @@ import {
   resolveOidcConfig,
   verifyIdToken,
 } from './oidc';
-import { findAccountBySub, linkAccountToSub, verifyLocalLogin } from './local-accounts';
 import { trackOidcLogin } from './roles';
-import { consumePendingLogin, createSessionId, deleteSession, storePendingLogin, storeSession } from './session-store';
 import { extractBearerToken } from './session';
 import type { Session } from './session';
+import {
+  consumePendingLogin,
+  createSessionId,
+  deleteSession,
+  storePendingLogin,
+  storeSession,
+} from './session-store';
 
 /** local-account identities are prefixed to keep them visually/structurally distinct from OIDC
  * `sub` values in RBAC bindings and audit logs — never collides with a real issuer's sub format. */
@@ -27,7 +33,10 @@ function uiOrigin(): string {
 /** `/login`/`/callback` are navigated to directly by the browser (a link click, or the IdP's own
  * redirect) — never fetched via the SPA's API client — so an error response has to be a redirect
  * back into the app, not a raw JSON body the browser would otherwise render as a bare page. */
-function redirectToLoginWithError(redirect: (url: string, status: number) => unknown, message: string) {
+function redirectToLoginWithError(
+  redirect: (url: string, status: number) => unknown,
+  message: string,
+) {
   const url = new URL('/login', uiOrigin());
   url.searchParams.set('error', message);
   return redirect(url.toString(), 302);
@@ -60,12 +69,17 @@ const isProd = process.env.NODE_ENV === 'production';
  */
 export function registerAuthRoutes(app: AnyElysia): AnyElysia {
   return app
-    .get('/api/v1/auth/oidc-status', async () => ({ configured: Boolean(await resolveOidcConfig()) }))
+    .get('/api/v1/auth/oidc-status', async () => ({
+      configured: Boolean(await resolveOidcConfig()),
+    }))
 
     .get('/api/v1/auth/login', async ({ cookie, redirect }) => {
       const config = await resolveOidcConfig();
       if (!config) {
-        return redirectToLoginWithError(redirect, 'OIDC is not configured — set it up in Settings, or ask an admin to.');
+        return redirectToLoginWithError(
+          redirect,
+          'OIDC is not configured — set it up in Settings, or ask an admin to.',
+        );
       }
 
       const state = generateState();
@@ -94,7 +108,10 @@ export function registerAuthRoutes(app: AnyElysia): AnyElysia {
       const code = query.code;
       const state = query.state;
       if (!code || !state) {
-        return redirectToLoginWithError(redirect, 'Login failed: missing code/state from the identity provider.');
+        return redirectToLoginWithError(
+          redirect,
+          'Login failed: missing code/state from the identity provider.',
+        );
       }
 
       // Requires the state to match a cookie set on THIS browser at /login time — a state that's
@@ -104,12 +121,18 @@ export function registerAuthRoutes(app: AnyElysia): AnyElysia {
       const stateCookie = cookie[OIDC_STATE_COOKIE]?.value;
       cookie[OIDC_STATE_COOKIE]?.remove();
       if (!stateCookie || stateCookie !== state) {
-        return redirectToLoginWithError(redirect, 'Login state does not match this browser — please try signing in again.');
+        return redirectToLoginWithError(
+          redirect,
+          'Login state does not match this browser — please try signing in again.',
+        );
       }
 
       const codeVerifier = consumePendingLogin(state);
       if (!codeVerifier) {
-        return redirectToLoginWithError(redirect, 'Login link expired — please try signing in again.');
+        return redirectToLoginWithError(
+          redirect,
+          'Login link expired — please try signing in again.',
+        );
       }
 
       try {
@@ -120,7 +143,9 @@ export function registerAuthRoutes(app: AnyElysia): AnyElysia {
         // the whole point of linking: one RBAC identity regardless of which login method was
         // used this time. Otherwise, try a fresh link by matching email (no-op if no local
         // account has that email, or if "email" wasn't requested as a scope at all).
-        const linked = (await findAccountBySub(verified.sub)) ?? (await linkAccountToSub(verified.email, verified.emailVerified, verified.sub));
+        const linked =
+          (await findAccountBySub(verified.sub)) ??
+          (await linkAccountToSub(verified.email, verified.emailVerified, verified.sub));
 
         let session: Session;
         if (linked) {
@@ -136,7 +161,11 @@ export function registerAuthRoutes(app: AnyElysia): AnyElysia {
           // `role: none`. Keeps email/displayName fresh on every login without ever touching an
           // already-assigned role.
           await trackOidcLogin(verified.sub, verified.email, displayName);
-          session = { identity: { impersonateUser: verified.sub, impersonateGroups: verified.groups }, displayName, kind: 'oidc' };
+          session = {
+            identity: { impersonateUser: verified.sub, impersonateGroups: verified.groups },
+            displayName,
+            kind: 'oidc',
+          };
         }
 
         const sessionId = createSessionId();

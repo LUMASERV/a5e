@@ -71,7 +71,9 @@ async function watchOnce<T>(
   });
 
   if (response.status !== 200) {
-    const error = new Error(response.statusText || 'watch request failed') as Error & { statusCode?: number };
+    const error = new Error(response.statusText || 'watch request failed') as Error & {
+      statusCode?: number;
+    };
     error.statusCode = response.status;
     return { error };
   }

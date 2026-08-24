@@ -31,7 +31,10 @@ function decode(data: Record<string, string> | undefined, key: string): string |
 
 export async function readOidcConfigSecret(): Promise<StoredOidcConfig | undefined> {
   try {
-    const secret = await coreApi.readNamespacedSecret({ name: SECRET_NAME, namespace: namespace() });
+    const secret = await coreApi.readNamespacedSecret({
+      name: SECRET_NAME,
+      namespace: namespace(),
+    });
     return {
       issuer: decode(secret.data, 'issuer'),
       clientId: decode(secret.data, 'clientId'),

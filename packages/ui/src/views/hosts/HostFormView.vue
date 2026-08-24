@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleHostSpec } from '@a5e/schemas';
-import { useNamespaceStore } from '../../stores/namespace';
-import { useHostStore } from '../../stores/resources';
+import { ElMessage } from 'element-plus';
+import { onMounted, reactive } from 'vue';
+import { useRouter } from 'vue-router';
 import JumpHostEditor from '../../components/JumpHostEditor.vue';
 import LabelsEditor from '../../components/LabelsEditor.vue';
 import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 import VarsEditor from '../../components/VarsEditor.vue';
+import { useNamespaceStore } from '../../stores/namespace';
+import { useHostStore } from '../../stores/resources';
 
 const props = defineProps<{ namespace?: string; name?: string }>();
 const router = useRouter();
@@ -17,7 +17,11 @@ const namespaceStore = useNamespaceStore();
 const store = useHostStore();
 
 const isEdit = Boolean(props.name);
-const form = reactive<{ name: string; labels: Record<string, string> | undefined; spec: AnsibleHostSpec }>({
+const form = reactive<{
+  name: string;
+  labels: Record<string, string> | undefined;
+  spec: AnsibleHostSpec;
+}>({
   name: props.name ?? '',
   labels: undefined,
   spec: { ansiblePort: 22, ansibleUser: 'root', enabled: true },
@@ -34,7 +38,10 @@ onMounted(async () => {
 
 async function save() {
   const namespace = isEdit ? props.namespace! : namespaceStore.current;
-  const spec = { ...form.spec, sshKeyRef: form.spec.sshKeyRef?.name ? form.spec.sshKeyRef : undefined };
+  const spec = {
+    ...form.spec,
+    sshKeyRef: form.spec.sshKeyRef?.name ? form.spec.sshKeyRef : undefined,
+  };
   try {
     if (isEdit) {
       const existing = await store.get(form.name, namespace);

@@ -33,7 +33,10 @@ function updateGroupName(gi: number, name: string) {
 function addHostSource(gi: number) {
   const groups = [...props.modelValue];
   const group = groups[gi]!;
-  groups[gi] = { ...group, hostSources: [...group.hostSources, { kind: 'AnsibleHost', labelSelector: {} }] };
+  groups[gi] = {
+    ...group,
+    hostSources: [...group.hostSources, { kind: 'AnsibleHost', labelSelector: {} }],
+  };
   update(groups);
 }
 function removeHostSource(gi: number, hi: number) {
@@ -49,7 +52,11 @@ function updateHostSourceKind(gi: number, hi: number, kind: 'AnsibleHost' | 'Clu
   const group = groups[gi]!;
   const hostSources = [...group.hostSources];
   const namespaceApplies = kind === 'AnsibleHost' && !props.namespaced;
-  hostSources[hi] = { ...hostSources[hi]!, kind, namespace: namespaceApplies ? hostSources[hi]!.namespace : undefined };
+  hostSources[hi] = {
+    ...hostSources[hi]!,
+    kind,
+    namespace: namespaceApplies ? hostSources[hi]!.namespace : undefined,
+  };
   groups[gi] = { ...group, hostSources };
   update(groups);
 }
@@ -61,7 +68,11 @@ function updateHostSourceNamespace(gi: number, hi: number, namespace: string) {
   groups[gi] = { ...group, hostSources };
   update(groups);
 }
-function updateLabelSelector(gi: number, hi: number, labelSelector: InventoryGroup['hostSources'][number]['labelSelector']) {
+function updateLabelSelector(
+  gi: number,
+  hi: number,
+  labelSelector: InventoryGroup['hostSources'][number]['labelSelector'],
+) {
   const groups = [...props.modelValue];
   const group = groups[gi]!;
   const hostSources = [...group.hostSources];

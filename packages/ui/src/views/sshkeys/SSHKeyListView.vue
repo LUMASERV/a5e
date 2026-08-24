@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import ResourceListView from '../../components/ResourceListView.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useSSHKeyStore } from '../../stores/resources';
-import ResourceListView from '../../components/ResourceListView.vue';
 
 const namespaceStore = useNamespaceStore();
 const store = useSSHKeyStore();

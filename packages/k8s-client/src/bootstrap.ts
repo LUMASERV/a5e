@@ -51,10 +51,7 @@ function ensureCaTrusted(caData: string | undefined, caFile: string | undefined)
   }
   if (isBunRuntime() && resolvedCaFile && process.env.NODE_EXTRA_CA_CERTS !== resolvedCaFile) {
     console.warn(
-      `[k8s-client] NODE_EXTRA_CA_CERTS is not set to the cluster CA (${resolvedCaFile}) at ` +
-        'Bun process startup — setting it now has no effect. k8s API calls will likely fail ' +
-        'with SELF_SIGNED_CERT_IN_CHAIN. Export NODE_EXTRA_CA_CERTS before launching this ' +
-        'process (see the comment in packages/k8s-client/src/bootstrap.ts).',
+      `[k8s-client] NODE_EXTRA_CA_CERTS is not set to the cluster CA (${resolvedCaFile}) at Bun process startup — setting it now has no effect. k8s API calls will likely fail with SELF_SIGNED_CERT_IN_CHAIN. Export NODE_EXTRA_CA_CERTS before launching this process (see the comment in packages/k8s-client/src/bootstrap.ts).`,
     );
   }
 }
@@ -119,7 +116,9 @@ export interface TokenKubeConfigOptions {
 export function loadKubeConfigFromToken(options: TokenKubeConfigOptions): k8s.KubeConfig {
   const kc = new k8s.KubeConfig();
   kc.loadFromOptions({
-    clusters: [{ name: 'cluster', server: options.server, caFile: options.caFile, caData: options.caData }],
+    clusters: [
+      { name: 'cluster', server: options.server, caFile: options.caFile, caData: options.caData },
+    ],
     users: [{ name: 'user', token: options.token }],
     contexts: [{ name: 'context', cluster: 'cluster', user: 'user' }],
     currentContext: 'context',

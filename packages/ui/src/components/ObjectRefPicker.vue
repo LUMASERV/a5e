@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
+import { computed, onMounted, ref, watch } from 'vue';
 import { apiClient } from '../api/client';
 import { resourceBasePath } from '../api/resource-path';
 
@@ -16,7 +16,9 @@ const props = withDefaults(
   }>(),
   { parentScope: 'namespaced' },
 );
-const emit = defineEmits<{ 'update:modelValue': [{ kind: string; name: string; namespace?: string }] }>();
+const emit = defineEmits<{
+  'update:modelValue': [{ kind: string; name: string; namespace?: string }];
+}>();
 
 const isCluster = computed(() => props.modelValue.kind === props.clusterKind);
 const namespaceRequired = computed(() => props.parentScope === 'cluster' && !isCluster.value);
@@ -33,7 +35,10 @@ async function loadOptions() {
       options.value = [];
       return;
     }
-    const path = resourceBasePath(descriptor, descriptor.scope === 'Namespaced' ? effectiveNamespace.value : undefined);
+    const path = resourceBasePath(
+      descriptor,
+      descriptor.scope === 'Namespaced' ? effectiveNamespace.value : undefined,
+    );
     const result = await apiClient.list<{ metadata: { name: string } }>(path);
     options.value = result.items.map((i) => i.metadata.name);
   } finally {

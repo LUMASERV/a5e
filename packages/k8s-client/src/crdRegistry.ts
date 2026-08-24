@@ -1,4 +1,9 @@
-import { API_GROUP, API_VERSION, RESOURCE_DESCRIPTORS, RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
+import {
+  API_GROUP,
+  API_VERSION,
+  RESOURCE_DESCRIPTORS,
+  RESOURCE_DESCRIPTORS_BY_KIND,
+} from '@a5e/schemas';
 import type { ResourceDescriptor } from '@a5e/schemas';
 
 export { API_GROUP, API_VERSION, RESOURCE_DESCRIPTORS, RESOURCE_DESCRIPTORS_BY_KIND };

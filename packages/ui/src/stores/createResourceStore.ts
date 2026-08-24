@@ -1,12 +1,14 @@
-import { ref, shallowRef } from 'vue';
-import { defineStore } from 'pinia';
 import type { CustomResource, ResourceDescriptor } from '@a5e/schemas';
+import { defineStore } from 'pinia';
+import { ref, shallowRef } from 'vue';
 import { apiClient } from '../api/client';
 import { resourceBasePath } from '../api/resource-path';
 import { watchResource } from '../api/watch';
 
 function keyOf(obj: CustomResource<unknown, unknown>): string {
-  return obj.metadata.namespace ? `${obj.metadata.namespace}/${obj.metadata.name}` : obj.metadata.name;
+  return obj.metadata.namespace
+    ? `${obj.metadata.namespace}/${obj.metadata.name}`
+    : obj.metadata.name;
 }
 
 /**
@@ -29,7 +31,9 @@ export function createResourceStore<TSpec, TStatus>(id: string, descriptor: Reso
       error.value = null;
       try {
         const path = resourceBasePath(descriptor, namespace);
-        const result = await apiClient.list<CustomResource<TSpec, TStatus>>(path, { labelSelector });
+        const result = await apiClient.list<CustomResource<TSpec, TStatus>>(path, {
+          labelSelector,
+        });
         items.value = new Map(result.items.map((o) => [keyOf(o), o]));
 
         stopWatch?.();
@@ -49,10 +53,15 @@ export function createResourceStore<TSpec, TStatus>(id: string, descriptor: Reso
     }
 
     function get(name: string, namespace?: string) {
-      return apiClient.get<CustomResource<TSpec, TStatus>>(`${resourceBasePath(descriptor, namespace)}/${name}`);
+      return apiClient.get<CustomResource<TSpec, TStatus>>(
+        `${resourceBasePath(descriptor, namespace)}/${name}`,
+      );
     }
     function create(body: unknown, namespace?: string) {
-      return apiClient.create<CustomResource<TSpec, TStatus>>(resourceBasePath(descriptor, namespace), body);
+      return apiClient.create<CustomResource<TSpec, TStatus>>(
+        resourceBasePath(descriptor, namespace),
+        body,
+      );
     }
     function update(name: string, body: unknown, namespace?: string) {
       return apiClient.replace<CustomResource<TSpec, TStatus>>(

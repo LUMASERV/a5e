@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { JumpHost } from '@a5e/schemas';
+import { computed, onMounted, ref, watch } from 'vue';
 import { apiClient } from '../api/client';
 import { resourceBasePath } from '../api/resource-path';
 
@@ -15,9 +15,13 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [JumpHost | undefined] }>();
 
 const enabled = computed(() => props.modelValue !== undefined);
-const mode = computed<'address' | 'hostRef'>(() => (props.modelValue?.hostRef ? 'hostRef' : 'address'));
+const mode = computed<'address' | 'hostRef'>(() =>
+  props.modelValue?.hostRef ? 'hostRef' : 'address',
+);
 const hostRefKind = computed(() => props.modelValue?.hostRef?.kind ?? 'AnsibleHost');
-const namespaceRequired = computed(() => props.parentScope === 'cluster' && hostRefKind.value === 'AnsibleHost');
+const namespaceRequired = computed(
+  () => props.parentScope === 'cluster' && hostRefKind.value === 'AnsibleHost',
+);
 const effectiveNamespace = computed(() => props.modelValue?.hostRef?.namespace || props.namespace);
 
 const options = ref<string[]>([]);
@@ -49,13 +53,20 @@ function toggle(on: boolean) {
 }
 function setMode(next: 'address' | 'hostRef') {
   if (next === 'hostRef') loadOptions();
-  emit('update:modelValue', next === 'address' ? { address: '' } : { hostRef: { kind: 'AnsibleHost', name: '' } });
+  emit(
+    'update:modelValue',
+    next === 'address' ? { address: '' } : { hostRef: { kind: 'AnsibleHost', name: '' } },
+  );
 }
 function updateAddress(patch: Partial<{ address: string; user: string; port: number }>) {
   emit('update:modelValue', { address: '', ...props.modelValue, ...patch });
 }
-function updateHostRef(patch: Partial<{ kind: 'AnsibleHost' | 'ClusterAnsibleHost'; name: string; namespace: string }>) {
-  emit('update:modelValue', { hostRef: { kind: 'AnsibleHost', name: '', ...props.modelValue?.hostRef, ...patch } });
+function updateHostRef(
+  patch: Partial<{ kind: 'AnsibleHost' | 'ClusterAnsibleHost'; name: string; namespace: string }>,
+) {
+  emit('update:modelValue', {
+    hostRef: { kind: 'AnsibleHost', name: '', ...props.modelValue?.hostRef, ...patch },
+  });
 }
 function setHostRefKind(kind: 'AnsibleHost' | 'ClusterAnsibleHost') {
   updateHostRef({ kind, name: '', namespace: undefined });

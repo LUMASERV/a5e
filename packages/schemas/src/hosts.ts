@@ -17,7 +17,8 @@ export const jumpHostSchema = z.object({
 export type JumpHost = z.infer<typeof jumpHostSchema>;
 
 export const JUMP_HOST_CEL = '(has(self.address)?1:0) + (has(self.hostRef)?1:0) == 1';
-export const JUMP_HOST_CEL_MESSAGE = 'exactly one of jumpHost.address or jumpHost.hostRef must be set';
+export const JUMP_HOST_CEL_MESSAGE =
+  'exactly one of jumpHost.address or jumpHost.hostRef must be set';
 
 // Hosts are always reached over SSH — there is no `connection` field (no local/winrm support).
 // The SSH key lives on the host, not the run: different hosts commonly need different keys, and

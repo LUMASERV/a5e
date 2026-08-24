@@ -1,5 +1,10 @@
-import { resolveInventoryGroups, type CustomResourceClient } from '@a5e/k8s-client';
-import type { AnsibleInventorySpec, AnsibleInventoryStatus, CustomResource, ResourceDescriptor } from '@a5e/schemas';
+import { type CustomResourceClient, resolveInventoryGroups } from '@a5e/k8s-client';
+import type {
+  AnsibleInventorySpec,
+  AnsibleInventoryStatus,
+  CustomResource,
+  ResourceDescriptor,
+} from '@a5e/schemas';
 import { patchReadyCondition } from './base-reconciler';
 
 /**
@@ -34,7 +39,8 @@ export async function reconcileInventory(
   const allHostKeys = new Set<string>();
   for (const group of groups) {
     groupCounts[group.name] = group.hosts.length;
-    for (const host of group.hosts) allHostKeys.add(`${host.kind}/${host.namespace ?? ''}/${host.name}`);
+    for (const host of group.hosts)
+      allHostKeys.add(`${host.kind}/${host.namespace ?? ''}/${host.name}`);
   }
 
   const status: AnsibleInventoryStatus = {
@@ -56,5 +62,12 @@ export async function reconcileInventory(
     );
     return;
   }
-  await patchReadyCondition(client, descriptor, { ...obj, status }, true, 'Ready', 'inventory resolved');
+  await patchReadyCondition(
+    client,
+    descriptor,
+    { ...obj, status },
+    true,
+    'Ready',
+    'inventory resolved',
+  );
 }

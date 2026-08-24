@@ -1,4 +1,4 @@
-import { resolveRefNamespace, type CustomResourceClient } from '@a5e/k8s-client';
+import { type CustomResourceClient, resolveRefNamespace } from '@a5e/k8s-client';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { CustomResource } from '@a5e/schemas';
 

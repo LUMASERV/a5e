@@ -1,9 +1,15 @@
 <script setup lang="ts">
+import type { CustomResource } from '@a5e/schemas';
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import type { CustomResource } from '@a5e/schemas';
 import { useNamespaceStore } from '../stores/namespace';
-import { useHostStore, useInventoryStore, usePlaybookStore, useRunStore, useSSHKeyStore } from '../stores/resources';
+import {
+  useHostStore,
+  useInventoryStore,
+  usePlaybookStore,
+  useRunStore,
+  useSSHKeyStore,
+} from '../stores/resources';
 
 const router = useRouter();
 const namespaceStore = useNamespaceStore();
@@ -15,7 +21,11 @@ const runStore = useRunStore();
 
 const recentRuns = computed(() =>
   Array.from(runStore.items.values())
-    .sort((a, b) => new Date(b.metadata.creationTimestamp ?? 0).getTime() - new Date(a.metadata.creationTimestamp ?? 0).getTime())
+    .sort(
+      (a, b) =>
+        new Date(b.metadata.creationTimestamp ?? 0).getTime() -
+        new Date(a.metadata.creationTimestamp ?? 0).getTime(),
+    )
     .slice(0, 10),
 );
 

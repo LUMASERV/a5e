@@ -22,5 +22,7 @@ export async function bootstrapAdminAccount(): Promise<void> {
     impersonateGroups: ['a5e-admins'],
     role: 'admin',
   });
-  console.log(`bootstrapped initial local admin account "${username}" — BOOTSTRAP_ADMIN_USERNAME/PASSWORD can be unset now`);
+  console.log(
+    `bootstrapped initial local admin account "${username}" — BOOTSTRAP_ADMIN_USERNAME/PASSWORD can be unset now`,
+  );
 }

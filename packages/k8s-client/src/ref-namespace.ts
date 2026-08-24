@@ -26,7 +26,11 @@ export function resolveRefNamespace(
   ownerNamespace: string | undefined,
 ): string | undefined {
   if (targetScope !== 'Namespaced') return undefined;
-  if (ownerNamespace !== undefined && refNamespace !== undefined && refNamespace !== ownerNamespace) {
+  if (
+    ownerNamespace !== undefined &&
+    refNamespace !== undefined &&
+    refNamespace !== ownerNamespace
+  ) {
     throw new Error(
       `cross-namespace reference not allowed: namespace "${refNamespace}" referenced from namespace "${ownerNamespace}"`,
     );

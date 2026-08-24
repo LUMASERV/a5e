@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useClusterSSHKeyStore } from '../../stores/resources';
 import ResourceListView from '../../components/ResourceListView.vue';
+import { useClusterSSHKeyStore } from '../../stores/resources';
 
 const store = useClusterSSHKeyStore();
 </script>

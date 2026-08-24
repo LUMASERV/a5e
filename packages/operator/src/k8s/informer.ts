@@ -1,11 +1,11 @@
-import type * as k8s from '@kubernetes/client-node';
 import {
-  allNamespacesPath,
   type CustomResourceClient,
+  allNamespacesPath,
   resourcePath,
   watchReconnecting,
 } from '@a5e/k8s-client';
 import type { CustomResource, ResourceDescriptor } from '@a5e/schemas';
+import type * as k8s from '@kubernetes/client-node';
 
 export interface ControllerOptions {
   /** Full re-list interval — self-heals from any watch events missed for any reason. Default 10 min. */
@@ -21,7 +21,13 @@ export interface ControllerOptions {
  * `{ requeueAfterMs }` — reconcile succeeded but the object isn't done yet (e.g. AnsibleRun
  * waiting on its Job) and should be revisited after a delay, WITHOUT that counting as an error
  * (no backoff growth, no error log) — the controller-runtime `Result{RequeueAfter}` pattern.
+ *
+ * `void`, not `undefined`, is deliberate here despite Biome's `noConfusingVoidType`: it's what
+ * lets a plain `async function` reconciler with no explicit return statement (inferred
+ * `Promise<void>`) satisfy `ReconcileFn` as-is — `undefined` doesn't get that same special-cased
+ * assignability from TypeScript, and every reconciler in controllers/*.ts relies on it.
  */
+// biome-ignore lint/suspicious/noConfusingVoidType: intentional, see doc comment above.
 export type ReconcileResult = void | { requeueAfterMs: number };
 export type ReconcileFn<T> = (obj: T) => Promise<ReconcileResult>;
 
@@ -58,7 +64,9 @@ export class ResourceController<TSpec, TStatus> implements Controller {
   ) {}
 
   private keyOf(obj: CustomResource<TSpec, TStatus>): string {
-    return obj.metadata.namespace ? `${obj.metadata.namespace}/${obj.metadata.name}` : obj.metadata.name;
+    return obj.metadata.namespace
+      ? `${obj.metadata.namespace}/${obj.metadata.name}`
+      : obj.metadata.name;
   }
 
   async start(): Promise<void> {
@@ -100,7 +108,9 @@ export class ResourceController<TSpec, TStatus> implements Controller {
     }
 
     this.watchHandle?.stop();
-    const path = isAllNamespaces ? allNamespacesPath(this.descriptor) : resourcePath(this.descriptor);
+    const path = isAllNamespaces
+      ? allNamespacesPath(this.descriptor)
+      : resourcePath(this.descriptor);
     this.watchHandle = watchReconnecting<CustomResource<TSpec, TStatus>>(
       this.kc,
       path,
@@ -118,7 +128,9 @@ export class ResourceController<TSpec, TStatus> implements Controller {
       },
       {
         onExpired: () => {
-          this.resync().catch((err) => console.error(`[${this.descriptor.kind}] resync after 410 failed`, err));
+          this.resync().catch((err) =>
+            console.error(`[${this.descriptor.kind}] resync after 410 failed`, err),
+          );
         },
         onError: (err) => console.error(`[${this.descriptor.kind}] watch error`, err),
       },

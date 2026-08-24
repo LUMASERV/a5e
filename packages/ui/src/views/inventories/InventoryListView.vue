@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus';
+import { downloadFile } from '../../api/client';
+import ResourceListView from '../../components/ResourceListView.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useInventoryStore } from '../../stores/resources';
-import ResourceListView from '../../components/ResourceListView.vue';
-import { downloadFile } from '../../api/client';
 
 const namespaceStore = useNamespaceStore();
 const store = useInventoryStore();
 
 async function download(namespace: string, name: string) {
   try {
-    await downloadFile(`/namespaces/${namespace}/ansibleinventories/${name}/download`, `${name}.yaml`);
+    await downloadFile(
+      `/namespaces/${namespace}/ansibleinventories/${name}/download`,
+      `${name}.yaml`,
+    );
   } catch (err) {
     ElMessage.error((err as Error).message);
   }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus';
-import { useClusterInventoryStore } from '../../stores/resources';
-import ResourceListView from '../../components/ResourceListView.vue';
 import { downloadFile } from '../../api/client';
+import ResourceListView from '../../components/ResourceListView.vue';
+import { useClusterInventoryStore } from '../../stores/resources';
 
 const store = useClusterInventoryStore();
 

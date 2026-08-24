@@ -36,7 +36,10 @@ export function toPublic(account: LocalAccount): PublicLocalAccount {
 
 async function readAccounts(): Promise<LocalAccount[]> {
   try {
-    const secret = await coreApi.readNamespacedSecret({ name: SECRET_NAME, namespace: namespace() });
+    const secret = await coreApi.readNamespacedSecret({
+      name: SECRET_NAME,
+      namespace: namespace(),
+    });
     const raw = secret.data?.accounts;
     if (!raw) return [];
     return JSON.parse(Buffer.from(raw, 'base64').toString('utf8')) as LocalAccount[];
@@ -104,11 +107,16 @@ export async function setLocalAccountRole(username: string, role: AppRole): Prom
   await writeAccounts(accounts);
 }
 
-export async function findLocalAccountByUsername(username: string): Promise<LocalAccount | undefined> {
+export async function findLocalAccountByUsername(
+  username: string,
+): Promise<LocalAccount | undefined> {
   return (await readAccounts()).find((a) => a.username === username);
 }
 
-export async function verifyLocalLogin(username: string, password: string): Promise<LocalAccount | undefined> {
+export async function verifyLocalLogin(
+  username: string,
+  password: string,
+): Promise<LocalAccount | undefined> {
   const account = (await readAccounts()).find((a) => a.username === username);
   if (!account) return undefined;
   const valid = await Bun.password.verify(password, account.passwordHash);
@@ -131,7 +139,11 @@ export async function findAccountBySub(sub: string): Promise<LocalAccount | unde
  * which would otherwise let an attacker link their own OIDC identity to (and inherit the role and
  * impersonation groups of) any local account just by knowing its email address.
  */
-export async function linkAccountToSub(email: string | undefined, emailVerified: boolean, sub: string): Promise<LocalAccount | undefined> {
+export async function linkAccountToSub(
+  email: string | undefined,
+  emailVerified: boolean,
+  sub: string,
+): Promise<LocalAccount | undefined> {
   if (!email || !emailVerified) return undefined;
   const accounts = await readAccounts();
   const match = accounts.find((a) => a.email?.toLowerCase() === email.toLowerCase());

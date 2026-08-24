@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { ElMessage } from 'element-plus';
 import type { AnsibleHostSpec, AnsibleHostStatus, CustomResource } from '@a5e/schemas';
+import { ElMessage } from 'element-plus';
+import { ref } from 'vue';
+import ResourceListView from '../../components/ResourceListView.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useHostStore } from '../../stores/resources';
-import ResourceListView from '../../components/ResourceListView.vue';
 
 const namespaceStore = useNamespaceStore();
 const store = useHostStore();
@@ -12,11 +12,15 @@ const store = useHostStore();
 const enabledFilter = ref<'all' | 'enabled' | 'disabled'>('all');
 function matchesEnabledFilter(item: CustomResource<unknown, unknown>): boolean {
   if (enabledFilter.value === 'all') return true;
-  const enabled = (item as CustomResource<AnsibleHostSpec, AnsibleHostStatus>).spec.enabled !== false;
+  const enabled =
+    (item as CustomResource<AnsibleHostSpec, AnsibleHostStatus>).spec.enabled !== false;
   return enabledFilter.value === 'enabled' ? enabled : !enabled;
 }
 
-async function toggleEnabled(row: CustomResource<AnsibleHostSpec, AnsibleHostStatus>, enabled: boolean) {
+async function toggleEnabled(
+  row: CustomResource<AnsibleHostSpec, AnsibleHostStatus>,
+  enabled: boolean,
+) {
   try {
     await store.patch(row.metadata.name, { spec: { enabled } }, row.metadata.namespace);
   } catch (err) {

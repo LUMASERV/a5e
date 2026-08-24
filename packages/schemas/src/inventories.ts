@@ -41,5 +41,4 @@ export const clusterAnsibleInventoryStatusSchema = ansibleInventoryStatusSchema;
  */
 export const HOST_SOURCE_CEL_NAMESPACED_PARENT =
   "self.kind != 'AnsibleHost' || !has(self.namespace)";
-export const HOST_SOURCE_CEL_CLUSTER_PARENT =
-  "self.kind != 'AnsibleHost' || has(self.namespace)";
+export const HOST_SOURCE_CEL_CLUSTER_PARENT = "self.kind != 'AnsibleHost' || has(self.namespace)";

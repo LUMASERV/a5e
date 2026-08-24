@@ -1,8 +1,8 @@
-import { callbackRedirectUri } from '../auth/oidc';
-import { readOidcConfigSecret, writeOidcConfigSecret } from '../lib/oidc-config-store';
 import { authorize } from '../auth/authorize';
+import { callbackRedirectUri } from '../auth/oidc';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
+import { readOidcConfigSecret, writeOidcConfigSecret } from '../lib/oidc-config-store';
 
 /**
  * Lets Settings show/edit the OIDC client config without a redeploy (see lib/oidc-config-store.ts
@@ -38,7 +38,12 @@ export function registerOidcSettingsRoutes(app: AnyElysia): AnyElysia {
       const auth = await authorize(extractBearerToken(headers), 'admin');
       if (auth instanceof Response) return auth;
 
-      const b = body as { issuer?: string; clientId?: string; clientSecret?: string; scopes?: string };
+      const b = body as {
+        issuer?: string;
+        clientId?: string;
+        clientSecret?: string;
+        scopes?: string;
+      };
       if (!b.issuer?.trim() || !b.clientId?.trim()) {
         set.status = 400;
         return { error: 'issuer and clientId are required' };

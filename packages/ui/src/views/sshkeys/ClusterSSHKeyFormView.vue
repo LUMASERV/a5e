@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import { API_GROUP_VERSION } from '@a5e/schemas';
+import { ElMessage } from 'element-plus';
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { API_GROUP_VERSION } from '@a5e/schemas';
-import { useClusterSSHKeyStore } from '../../stores/resources';
 import { apiClient } from '../../api/client';
 import { useNamespaceStore } from '../../stores/namespace';
+import { useClusterSSHKeyStore } from '../../stores/resources';
 
 const router = useRouter();
 const store = useClusterSSHKeyStore();
@@ -46,7 +46,11 @@ async function save() {
         kind: 'ClusterAnsibleSSHKey',
         metadata: { name: form.name },
         spec: {
-          secretRef: { name: form.secretName, namespace: form.secretNamespace, key: form.secretKey || undefined },
+          secretRef: {
+            name: form.secretName,
+            namespace: form.secretNamespace,
+            key: form.secretKey || undefined,
+          },
           passphraseSecretRef: form.passphraseSecretName
             ? {
                 name: form.passphraseSecretName,

@@ -50,7 +50,9 @@ export async function streamPodLog(
   });
 
   if (response.status !== 200 || !response.body) {
-    const error = new Error(response.statusText || 'log request failed') as Error & { statusCode?: number };
+    const error = new Error(response.statusText || 'log request failed') as Error & {
+      statusCode?: number;
+    };
     error.statusCode = response.status;
     throw error;
   }

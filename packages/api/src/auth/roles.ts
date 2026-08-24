@@ -37,7 +37,10 @@ export interface OidcUserRoleEntry {
 
 async function readOidcUserRoles(): Promise<OidcUserRoleEntry[]> {
   try {
-    const cm = await coreApi.readNamespacedConfigMap({ name: CONFIGMAP_NAME, namespace: namespace() });
+    const cm = await coreApi.readNamespacedConfigMap({
+      name: CONFIGMAP_NAME,
+      namespace: namespace(),
+    });
     const raw = cm.data?.users;
     if (!raw) return [];
     return JSON.parse(raw) as OidcUserRoleEntry[];
@@ -57,7 +60,10 @@ async function writeOidcUserRoles(entries: OidcUserRoleEntry[]): Promise<void> {
     });
   } catch (err) {
     if ((err as { code?: number }).code !== 404) throw err;
-    await coreApi.createNamespacedConfigMap({ namespace: namespace(), body: { metadata: { name: CONFIGMAP_NAME }, data } });
+    await coreApi.createNamespacedConfigMap({
+      namespace: namespace(),
+      body: { metadata: { name: CONFIGMAP_NAME }, data },
+    });
   }
 }
 
@@ -81,7 +87,11 @@ export async function deleteOidcUserRole(sub: string): Promise<void> {
 /** Called once per OIDC login for a not-linked-to-a-local-account identity — creates a `role:
  * 'none'` placeholder on first sight (so an admin has something to find and promote) and keeps
  * email/displayName fresh on every subsequent login, but never touches an already-set role. */
-export async function trackOidcLogin(sub: string, email: string | undefined, displayName: string): Promise<void> {
+export async function trackOidcLogin(
+  sub: string,
+  email: string | undefined,
+  displayName: string,
+): Promise<void> {
   const entries = await readOidcUserRoles();
   const existing = entries.find((e) => e.sub === sub);
   if (existing) {

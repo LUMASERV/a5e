@@ -1,8 +1,11 @@
-import type * as k8s from '@kubernetes/client-node';
-import { resolveInventoryGroups, resolveRefNamespace, type CustomResourceClient, type ResolvedGroup } from '@a5e/k8s-client';
+import {
+  type CustomResourceClient,
+  type ResolvedGroup,
+  resolveInventoryGroups,
+  resolveRefNamespace,
+} from '@a5e/k8s-client';
 import {
   API_GROUP_VERSION,
-  RESOURCE_DESCRIPTORS_BY_KIND,
   type AnsibleInventorySpec,
   type AnsiblePlaybookSpec,
   type AnsibleRunSpec,
@@ -13,14 +16,16 @@ import {
   type Condition,
   type CustomResource,
   type FailedStep,
+  RESOURCE_DESCRIPTORS_BY_KIND,
   type ResourceDescriptor,
 } from '@a5e/schemas';
-import type { ReconcileResult } from '../k8s/informer';
+import type * as k8s from '@kubernetes/client-node';
 import type { CoreResources } from '../k8s/core';
-import { resolveRef } from '../resolvers/object-ref';
+import type { ReconcileResult } from '../k8s/informer';
 import { renderInventoryIni } from '../resolvers/inventory-render';
+import { type JobBuildInput, type SshKeyMount, buildJobSpec } from '../resolvers/job-builder';
+import { resolveRef } from '../resolvers/object-ref';
 import { buildRequirementsYaml } from '../resolvers/requirements-yaml';
-import { buildJobSpec, type JobBuildInput, type SshKeyMount } from '../resolvers/job-builder';
 import { type S3Config, uploadRunLog } from '../s3/uploader';
 
 const TERMINAL_PHASES = new Set(['Succeeded', 'Failed', 'Error', 'Cancelled']);
@@ -43,7 +48,11 @@ async function patchRunStatus(
   patch: Partial<AnsibleRunStatus>,
   conditionOverride?: { reason: string; message: string },
 ): Promise<void> {
-  const merged: AnsibleRunStatus = { ...obj.status, ...patch, observedGeneration: obj.metadata.generation };
+  const merged: AnsibleRunStatus = {
+    ...obj.status,
+    ...patch,
+    observedGeneration: obj.metadata.generation,
+  };
   if (patch.phase) {
     const condition: Condition = {
       type: 'Ready',
@@ -93,17 +102,18 @@ async function resolveHostSshKeys(
       // `host.namespace` is already `undefined` for a ClusterAnsibleHost — see
       // resolveRefNamespace's doc comment for why a namespaced host must never be allowed to
       // point sshKeyRef at a foreign namespace (this was a real cross-tenant vulnerability).
-      const sshKeyNamespace = resolveRefNamespace(sshKeyDescriptor.scope, ref.namespace, host.namespace);
+      const sshKeyNamespace = resolveRefNamespace(
+        sshKeyDescriptor.scope,
+        ref.namespace,
+        host.namespace,
+      );
       const refKey = `${ref.kind}/${sshKeyNamespace ?? ''}/${ref.name}`;
 
       let mount = mountByRefKey.get(refKey);
       if (!mount) {
-        const sshKeyObj = await client.get<CustomResource<AnsibleSSHKeySpec | ClusterAnsibleSSHKeySpec, AnsibleSSHKeyStatus>>(
-          sshKeyDescriptor,
-          ref.name,
-          'self',
-          sshKeyNamespace,
-        );
+        const sshKeyObj = await client.get<
+          CustomResource<AnsibleSSHKeySpec | ClusterAnsibleSSHKeySpec, AnsibleSSHKeyStatus>
+        >(sshKeyDescriptor, ref.name, 'self', sshKeyNamespace);
         if (!sshKeyObj.status?.publicKey) {
           return { requeue: true }; // sshkey-controller hasn't derived it yet
         }
@@ -111,9 +121,18 @@ async function resolveHostSshKeys(
         // Same rule for the AnsibleSSHKey's OWN secretRef: a namespaced AnsibleSSHKey must never
         // be allowed to point at a Secret in a different namespace either (the actual step in the
         // exploit chain that let a copied Secret's raw key bytes reach the attacker's namespace).
-        const sshKeyOwnNamespace = sshKeyDescriptor.scope === 'Namespaced' ? sshKeyObj.metadata.namespace : undefined;
-        const sourceSecretNamespace = resolveRefNamespace('Namespaced', sshKeyObj.spec.secretRef.namespace, sshKeyOwnNamespace) ?? namespace;
-        const sourceSecret = await core.getSecret(sourceSecretNamespace, sshKeyObj.spec.secretRef.name);
+        const sshKeyOwnNamespace =
+          sshKeyDescriptor.scope === 'Namespaced' ? sshKeyObj.metadata.namespace : undefined;
+        const sourceSecretNamespace =
+          resolveRefNamespace(
+            'Namespaced',
+            sshKeyObj.spec.secretRef.namespace,
+            sshKeyOwnNamespace,
+          ) ?? namespace;
+        const sourceSecret = await core.getSecret(
+          sourceSecretNamespace,
+          sshKeyObj.spec.secretRef.name,
+        );
         const sourceKey = sshKeyObj.spec.secretRef.key ?? 'ssh-privatekey';
         const mountName = `key${mountIndex++}`;
         const secretName = `${namePrefix}-sshkey-${mountName}`;
@@ -131,7 +150,9 @@ async function resolveHostSshKeys(
   }
 
   if (missingHosts.length > 0) {
-    throw new Error(`host(s) missing spec.sshKeyRef, required to connect over SSH: ${missingHosts.join(', ')}`);
+    throw new Error(
+      `host(s) missing spec.sshKeyRef, required to connect over SSH: ${missingHosts.join(', ')}`,
+    );
   }
 
   return { requeue: false, mounts: [...mountByRefKey.values()] };
@@ -158,7 +179,10 @@ export async function reconcileRun(
     if (status.jobRef) {
       await core.deleteJob(namespace, status.jobRef.name).catch(() => undefined);
     }
-    await patchRunStatus(client, descriptor, obj, { phase: 'Cancelled', completionTime: new Date().toISOString() });
+    await patchRunStatus(client, descriptor, obj, {
+      phase: 'Cancelled',
+      completionTime: new Date().toISOString(),
+    });
     return;
   }
 
@@ -188,8 +212,16 @@ async function startRun(
       await patchRunStatus(client, descriptor, obj, { phase: 'Resolving' });
     }
 
-    const playbookObj = await resolveRef<AnsiblePlaybookSpec, unknown>(client, obj.spec.playbookRef, namespace);
-    const inventoryObj = await resolveRef<AnsibleInventorySpec, unknown>(client, obj.spec.inventoryRef, namespace);
+    const playbookObj = await resolveRef<AnsiblePlaybookSpec, unknown>(
+      client,
+      obj.spec.playbookRef,
+      namespace,
+    );
+    const inventoryObj = await resolveRef<AnsibleInventorySpec, unknown>(
+      client,
+      obj.spec.inventoryRef,
+      namespace,
+    );
 
     const owner = ownerRef(obj);
     const namePrefix = `ansiblerun-${runName}`;
@@ -202,9 +234,22 @@ async function startRun(
     // `undefined` for a ClusterAnsibleInventory) — read it directly rather than recomputing from
     // `obj.spec.inventoryRef` a second time, so there's only one place (resolveRef, above) that
     // ever decides whether a cross-namespace inventoryRef was legitimate.
-    const groups = await resolveInventoryGroups(client, 'self', inventoryObj.spec, inventoryObj.metadata.namespace, true);
+    const groups = await resolveInventoryGroups(
+      client,
+      'self',
+      inventoryObj.spec,
+      inventoryObj.metadata.namespace,
+      true,
+    );
 
-    const sshKeyResult = await resolveHostSshKeys(client, core, namespace, namePrefix, owner, groups);
+    const sshKeyResult = await resolveHostSshKeys(
+      client,
+      core,
+      namespace,
+      namePrefix,
+      owner,
+      groups,
+    );
     if (sshKeyResult.requeue) {
       return { requeueAfterMs: 3000 }; // controller-ordering dependency — sshkey-controller hasn't derived it yet
     }
@@ -217,7 +262,10 @@ async function startRun(
     });
 
     // Extra vars: playbook defaults, then the run's own overrides win.
-    const mergedExtraVars = { ...(playbookObj.spec.extraVars ?? {}), ...(obj.spec.extraVars ?? {}) };
+    const mergedExtraVars = {
+      ...(playbookObj.spec.extraVars ?? {}),
+      ...(obj.spec.extraVars ?? {}),
+    };
     const extraVarsCm = await core.createOrUpdateConfigMap(namespace, {
       metadata: { name: `${namePrefix}-extravars`, namespace, ownerReferences: [owner] },
       data: { 'extra-vars.json': JSON.stringify(mergedExtraVars) },
@@ -240,7 +288,8 @@ async function startRun(
     // refs at a foreign namespace either — same rule, same rationale as resolveRefNamespace's
     // doc comment (a namespaced owner's refs must stay in its own namespace).
     const playbookDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[obj.spec.playbookRef.kind]!;
-    const playbookOwnNamespace = playbookDescriptor.scope === 'Namespaced' ? playbookObj.metadata.namespace : undefined;
+    const playbookOwnNamespace =
+      playbookDescriptor.scope === 'Namespaced' ? playbookObj.metadata.namespace : undefined;
 
     if (playbookObj.spec.source.inline) {
       const cm = await core.createOrUpdateConfigMap(namespace, {
@@ -250,7 +299,8 @@ async function startRun(
       playbookConfigMapName = cm.metadata!.name!;
     } else if (playbookObj.spec.source.configMapRef) {
       const ref = playbookObj.spec.source.configMapRef;
-      const refNamespace = resolveRefNamespace('Namespaced', ref.namespace, playbookOwnNamespace) ?? namespace;
+      const refNamespace =
+        resolveRefNamespace('Namespaced', ref.namespace, playbookOwnNamespace) ?? namespace;
       const sourceCm = await core.getConfigMap(refNamespace, ref.name);
       const key = ref.key ?? 'playbook.yml';
       const content = sourceCm.data?.[key];
@@ -266,7 +316,9 @@ async function startRun(
       let basicAuthSecretName: string | undefined;
 
       if (git.sshKeySecretRef) {
-        const secretNamespace = resolveRefNamespace('Namespaced', git.sshKeySecretRef.namespace, playbookOwnNamespace) ?? namespace;
+        const secretNamespace =
+          resolveRefNamespace('Namespaced', git.sshKeySecretRef.namespace, playbookOwnNamespace) ??
+          namespace;
         const sourceSecret = await core.getSecret(secretNamespace, git.sshKeySecretRef.name);
         sshKeySecretName = `${namePrefix}-git-sshkey`;
         await core.createOrUpdateSecret(namespace, {
@@ -275,7 +327,12 @@ async function startRun(
           data: sourceSecret.data,
         });
       } else if (git.basicAuthSecretRef) {
-        const secretNamespace = resolveRefNamespace('Namespaced', git.basicAuthSecretRef.namespace, playbookOwnNamespace) ?? namespace;
+        const secretNamespace =
+          resolveRefNamespace(
+            'Namespaced',
+            git.basicAuthSecretRef.namespace,
+            playbookOwnNamespace,
+          ) ?? namespace;
         const sourceSecret = await core.getSecret(secretNamespace, git.basicAuthSecretRef.name);
         basicAuthSecretName = `${namePrefix}-git-basicauth`;
         await core.createOrUpdateSecret(namespace, {
@@ -291,7 +348,8 @@ async function startRun(
 
     // Dependencies (Galaxy roles/collections).
     const hasDependencies = Boolean(
-      playbookObj.spec.dependencies?.roles?.length || playbookObj.spec.dependencies?.collections?.length,
+      playbookObj.spec.dependencies?.roles?.length ||
+        playbookObj.spec.dependencies?.collections?.length,
     );
     let requirementsConfigMapName: string | undefined;
     if (hasDependencies) {
@@ -362,8 +420,8 @@ function determineFailedStep(pod: k8s.V1Pod): FailedStep | undefined {
 }
 
 function mainExitCode(pod: k8s.V1Pod): number | undefined {
-  return (pod.status?.containerStatuses ?? []).find((c) => c.name === 'ansible-playbook')?.state?.terminated
-    ?.exitCode;
+  return (pod.status?.containerStatuses ?? []).find((c) => c.name === 'ansible-playbook')?.state
+    ?.terminated?.exitCode;
 }
 
 async function pollRun(
@@ -419,7 +477,9 @@ async function pollRun(
     fullLogs = chunks.join('\n\n');
   }
 
-  let logs: AnsibleRunStatus['logs'] = podName ? { podRef: { name: podName, container: 'ansible-playbook' } } : undefined;
+  let logs: AnsibleRunStatus['logs'] = podName
+    ? { podRef: { name: podName, container: 'ansible-playbook' } }
+    : undefined;
   if (s3Config) {
     try {
       const key = `${namespace}/${obj.metadata.name}/log.txt`;
@@ -442,7 +502,9 @@ async function pollRun(
   // Only shorten the Job's TTL once log capture is resolved (uploaded, or permanently given up
   // on) — this ordering is what protects logs from GC racing the upload (plan §3.4 step 3g).
   await core
-    .patchJob(namespace, jobName, { spec: { ttlSecondsAfterFinished: obj.spec.ttlSecondsAfterFinished ?? 3600 } })
+    .patchJob(namespace, jobName, {
+      spec: { ttlSecondsAfterFinished: obj.spec.ttlSecondsAfterFinished ?? 3600 },
+    })
     .catch(() => undefined);
 
   await patchRunStatus(client, descriptor, obj, {

@@ -44,7 +44,9 @@ export async function resolveJumpChain(
 
   const key = refKey(host.kind, host.namespace, host.name);
   if (visited.has(key)) {
-    throw new Error(`JumpHostCycleDetected: cycle involving ${host.kind}/${host.namespace ?? ''}/${host.name}`);
+    throw new Error(
+      `JumpHostCycleDetected: cycle involving ${host.kind}/${host.namespace ?? ''}/${host.name}`,
+    );
   }
   visited.add(key);
 
@@ -60,7 +62,12 @@ export async function resolveJumpChain(
   // namespaced host's jumpHost.hostRef pointing at another namespace was a real cross-tenant
   // vulnerability (see resolveRefNamespace's doc comment) before this check existed.
   const namespace = resolveRefNamespace(descriptor.scope, ref.namespace, host.namespace);
-  const jumpObj = await client.get<CustomResource<AnsibleHostSpec, unknown>>(descriptor, ref.name, identity, namespace);
+  const jumpObj = await client.get<CustomResource<AnsibleHostSpec, unknown>>(
+    descriptor,
+    ref.name,
+    identity,
+    namespace,
+  );
 
   const jumpHostAsResolved = {
     kind: ref.kind,
@@ -113,16 +120,27 @@ export async function resolveInventoryGroups(
     for (const source of group.hostSources) {
       const descriptor = RESOURCE_DESCRIPTORS_BY_KIND[source.kind]!;
       const labelSelector = labelSelectorToString(source.labelSelector);
-      const namespace = source.kind === 'AnsibleHost' ? (source.namespace ?? inventoryNamespace) : undefined;
+      const namespace =
+        source.kind === 'AnsibleHost' ? (source.namespace ?? inventoryNamespace) : undefined;
 
       const result =
         descriptor.scope === 'Namespaced'
-          ? await client.list<CustomResource<AnsibleHostSpec, unknown>>(descriptor, identity, namespace, {
-              labelSelector,
-            })
-          : await client.list<CustomResource<AnsibleHostSpec, unknown>>(descriptor, identity, undefined, {
-              labelSelector,
-            });
+          ? await client.list<CustomResource<AnsibleHostSpec, unknown>>(
+              descriptor,
+              identity,
+              namespace,
+              {
+                labelSelector,
+              },
+            )
+          : await client.list<CustomResource<AnsibleHostSpec, unknown>>(
+              descriptor,
+              identity,
+              undefined,
+              {
+                labelSelector,
+              },
+            );
 
       for (const hostObj of result.items) {
         if (hostObj.spec.enabled === false) continue;

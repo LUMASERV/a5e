@@ -1,11 +1,11 @@
-import YAML from 'yaml';
+import { type JumpChainHop, type ResolvedGroup, resolveInventoryGroups } from '@a5e/k8s-client';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleInventorySpec, AnsibleInventoryStatus, CustomResource } from '@a5e/schemas';
-import { resolveInventoryGroups, type JumpChainHop, type ResolvedGroup } from '@a5e/k8s-client';
-import { client } from '../plugins/k8s';
+import YAML from 'yaml';
 import { authorize } from '../auth/authorize';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
+import { client } from '../plugins/k8s';
 
 function hopToSshTarget(hop: JumpChainHop): string {
   const userPrefix = hop.user ? `${hop.user}@` : '';
@@ -20,7 +20,10 @@ function hopToSshTarget(hop: JumpChainHop): string {
  * (those get an INI rendering via renderInventoryIni, plus a per-host SSH key mount path that
  * only means anything inside a Job's Pod, deliberately omitted here).
  */
-export function renderInventoryYaml(topLevelVars: Record<string, unknown> | undefined, groups: ResolvedGroup[]): string {
+export function renderInventoryYaml(
+  topLevelVars: Record<string, unknown> | undefined,
+  groups: ResolvedGroup[],
+): string {
   const childrenNode: Record<string, unknown> = {};
 
   for (const group of groups) {
@@ -43,7 +46,8 @@ export function renderInventoryYaml(topLevelVars: Record<string, unknown> | unde
     const groupNode: Record<string, unknown> = {};
     if (Object.keys(hostsNode).length > 0) groupNode.hosts = hostsNode;
     if (group.vars && Object.keys(group.vars).length > 0) groupNode.vars = group.vars;
-    if (group.children?.length) groupNode.children = Object.fromEntries(group.children.map((c) => [c, null]));
+    if (group.children?.length)
+      groupNode.children = Object.fromEntries(group.children.map((c) => [c, null]));
     childrenNode[group.name] = Object.keys(groupNode).length > 0 ? groupNode : null;
   }
 
@@ -52,7 +56,12 @@ export function renderInventoryYaml(topLevelVars: Record<string, unknown> | unde
   return YAML.stringify({ all });
 }
 
-async function handleDownload(kind: 'AnsibleInventory' | 'ClusterAnsibleInventory', name: string, namespace: string | undefined, token?: string) {
+async function handleDownload(
+  kind: 'AnsibleInventory' | 'ClusterAnsibleInventory',
+  name: string,
+  namespace: string | undefined,
+  token?: string,
+) {
   const auth = await authorize(token, 'user');
   if (auth instanceof Response) return auth;
   const { session } = auth;
@@ -79,9 +88,19 @@ async function handleDownload(kind: 'AnsibleInventory' | 'ClusterAnsibleInventor
 export function registerInventoryDownloadRoutes(app: AnyElysia): AnyElysia {
   return app
     .get('/api/v1/namespaces/:namespace/ansibleinventories/:name/download', ({ params, headers }) =>
-      handleDownload('AnsibleInventory', params.name, params.namespace, extractBearerToken(headers)),
+      handleDownload(
+        'AnsibleInventory',
+        params.name,
+        params.namespace,
+        extractBearerToken(headers),
+      ),
     )
     .get('/api/v1/clusteransibleinventories/:name/download', ({ params, headers }) =>
-      handleDownload('ClusterAnsibleInventory', params.name, undefined, extractBearerToken(headers)),
+      handleDownload(
+        'ClusterAnsibleInventory',
+        params.name,
+        undefined,
+        extractBearerToken(headers),
+      ),
     );
 }

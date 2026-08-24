@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import { API_GROUP_VERSION } from '@a5e/schemas';
+import { ElMessage } from 'element-plus';
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { API_GROUP_VERSION } from '@a5e/schemas';
+import { apiClient } from '../../api/client';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useSSHKeyStore } from '../../stores/resources';
-import { apiClient } from '../../api/client';
 
 const router = useRouter();
 const namespaceStore = useNamespaceStore();

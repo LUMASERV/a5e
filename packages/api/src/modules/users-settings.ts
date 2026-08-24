@@ -1,8 +1,8 @@
+import { authorize } from '../auth/authorize';
 import { createLocalAccount } from '../auth/local-accounts';
 import { APP_ROLES, type AppRole } from '../auth/roles';
-import { deleteUser, listUsers, setUserRole } from '../auth/users';
-import { authorize } from '../auth/authorize';
 import { extractBearerToken } from '../auth/session';
+import { deleteUser, listUsers, setUserRole } from '../auth/users';
 import type { AnyElysia } from '../lib/elysia-types';
 
 function isAppRole(value: unknown): value is AppRole {

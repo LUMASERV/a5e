@@ -49,6 +49,14 @@ bun test
 cd packages/<changed-package> && bun run typecheck
 ```
 
+`bun run lint` (Biome) has `noNonNullAssertion` turned off project-wide (`biome.json`) — the
+codebase uses `!` deliberately and pervasively for guaranteed-present lookups (e.g.
+`RESOURCE_DESCRIPTORS_BY_KIND.AnsibleHost!`, where the key set is a closed, known-valid enum);
+TypeScript's control-flow narrowing can't see that guarantee, and threading an explicit runtime
+check through every call site would just be noise. Everything else in `recommended` stays on —
+use an inline `// biome-ignore lint/<rule>: <reason>` comment for a genuine one-off exception
+instead of disabling a rule project-wide.
+
 For UI changes, please also manually verify the change in a browser against a local cluster —
 there's no end-to-end test suite yet beyond the manual smoke test described in
 `charts/a5e/README.md`.

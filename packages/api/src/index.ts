@@ -1,17 +1,17 @@
+import { RESOURCE_DESCRIPTORS } from '@a5e/schemas';
 import cors from '@elysiajs/cors';
 import { Elysia } from 'elysia';
-import { RESOURCE_DESCRIPTORS } from '@a5e/schemas';
-import type { AnyElysia } from './lib/elysia-types';
-import { registerResourceRoutes } from './modules/resource-routes';
-import { registerAnsibleRunRoutes } from './modules/ansibleruns';
-import { registerAnsibleJobRoutes } from './modules/ansiblejobs';
-import { registerAncillaryRoutes } from './modules/ancillary';
-import { registerOidcSettingsRoutes } from './modules/oidc-settings';
-import { registerUsersSettingsRoutes } from './modules/users-settings';
-import { registerSSHKeyImportRoutes } from './modules/sshkey-import';
-import { registerInventoryDownloadRoutes } from './modules/inventory-download';
-import { registerAuthRoutes } from './auth/routes';
 import { bootstrapAdminAccount } from './auth/bootstrap';
+import { registerAuthRoutes } from './auth/routes';
+import type { AnyElysia } from './lib/elysia-types';
+import { registerAncillaryRoutes } from './modules/ancillary';
+import { registerAnsibleJobRoutes } from './modules/ansiblejobs';
+import { registerAnsibleRunRoutes } from './modules/ansibleruns';
+import { registerInventoryDownloadRoutes } from './modules/inventory-download';
+import { registerOidcSettingsRoutes } from './modules/oidc-settings';
+import { registerResourceRoutes } from './modules/resource-routes';
+import { registerSSHKeyImportRoutes } from './modules/sshkey-import';
+import { registerUsersSettingsRoutes } from './modules/users-settings';
 
 await bootstrapAdminAccount();
 

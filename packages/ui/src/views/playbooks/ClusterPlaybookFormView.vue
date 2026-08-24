@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsiblePlaybookSpec } from '@a5e/schemas';
-import { useClusterPlaybookStore } from '../../stores/resources';
+import { ElMessage } from 'element-plus';
+import { onMounted, reactive } from 'vue';
+import { useRouter } from 'vue-router';
 import PlaybookSourceEditor from '../../components/PlaybookSourceEditor.vue';
+import { useClusterPlaybookStore } from '../../stores/resources';
 
 const props = defineProps<{ name?: string }>();
 const router = useRouter();

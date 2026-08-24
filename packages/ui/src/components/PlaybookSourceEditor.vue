@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { PlaybookSource } from '@a5e/schemas';
+import { computed } from 'vue';
 
 const props = defineProps<{ modelValue: PlaybookSource }>();
 const emit = defineEmits<{ 'update:modelValue': [PlaybookSource] }>();
@@ -22,7 +22,9 @@ function updateInline(playbook: string) {
   emit('update:modelValue', { inline: { playbook } });
 }
 function updateConfigMapRef(patch: Partial<{ name: string; namespace: string; key: string }>) {
-  emit('update:modelValue', { configMapRef: { ...props.modelValue.configMapRef, name: '', ...patch } });
+  emit('update:modelValue', {
+    configMapRef: { ...props.modelValue.configMapRef, name: '', ...patch },
+  });
 }
 function updateGit(
   patch: Partial<{

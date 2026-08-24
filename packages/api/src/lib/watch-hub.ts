@@ -1,13 +1,13 @@
-import type * as k8s from '@kubernetes/client-node';
 import {
-  allNamespacesPath,
   type CallerIdentity,
   type CustomResourceClient,
+  type WatchEvent,
+  allNamespacesPath,
   resourcePath,
   watchReconnecting,
-  type WatchEvent,
 } from '@a5e/k8s-client';
 import type { CustomResource, ResourceDescriptor } from '@a5e/schemas';
+import type * as k8s from '@kubernetes/client-node';
 
 function identityKey(identity: CallerIdentity): string {
   if (identity === 'self') return 'self';
@@ -51,12 +51,21 @@ export class WatchHub {
     if (!hub) {
       const isAllNamespaces = descriptor.scope === 'Namespaced' && !namespace;
       const result = isAllNamespaces
-        ? await this.client.listAllNamespaces<CustomResource<unknown, unknown>>(descriptor, identity, {
-            labelSelector,
-          })
-        : await this.client.list<CustomResource<unknown, unknown>>(descriptor, identity, namespace, {
-            labelSelector,
-          });
+        ? await this.client.listAllNamespaces<CustomResource<unknown, unknown>>(
+            descriptor,
+            identity,
+            {
+              labelSelector,
+            },
+          )
+        : await this.client.list<CustomResource<unknown, unknown>>(
+            descriptor,
+            identity,
+            namespace,
+            {
+              labelSelector,
+            },
+          );
       initialResourceVersion = result.resourceVersion;
 
       hub = { subscribers: new Set(), watchHandle: null };
@@ -81,7 +90,9 @@ export class WatchHub {
           onExpired: () => {
             // A relist-from-scratch is the caller's job on the next fresh subscribe; existing
             // subscribers just see a gap here, acceptable for a first cut (plan risk-accepted).
-            console.warn(`[WatchHub] ${key}: resourceVersion expired (410), watch restarting fresh`);
+            console.warn(
+              `[WatchHub] ${key}: resourceVersion expired (410), watch restarting fresh`,
+            );
           },
           onError: (err) => console.error(`[WatchHub] ${key} watch error`, err),
         },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { LabelSelector } from '@a5e/schemas';
+import { computed } from 'vue';
 
 const props = defineProps<{ modelValue: LabelSelector }>();
 const emit = defineEmits<{ 'update:modelValue': [LabelSelector] }>();

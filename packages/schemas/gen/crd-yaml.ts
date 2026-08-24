@@ -10,16 +10,26 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import YAML from 'yaml';
-import { API_GROUP, API_VERSION, RESOURCE_DESCRIPTORS, type ResourceDescriptor } from '../src/crd-meta';
-import { REF_CEL_CLUSTER_KIND_NO_NAMESPACE } from '../src/refs';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import {
+  API_GROUP,
+  API_VERSION,
+  RESOURCE_DESCRIPTORS,
+  type ResourceDescriptor,
+} from '../src/crd-meta';
+import { JUMP_HOST_CEL, JUMP_HOST_CEL_MESSAGE } from '../src/hosts';
 import {
   HOST_SOURCE_CEL_CLUSTER_PARENT,
   HOST_SOURCE_CEL_NAMESPACED_PARENT,
 } from '../src/inventories';
-import { GIT_AUTH_CEL, GIT_AUTH_CEL_MESSAGE, PLAYBOOK_SOURCE_CEL, PLAYBOOK_SOURCE_CEL_MESSAGE } from '../src/playbooks';
-import { JUMP_HOST_CEL, JUMP_HOST_CEL_MESSAGE } from '../src/hosts';
+import {
+  GIT_AUTH_CEL,
+  GIT_AUTH_CEL_MESSAGE,
+  PLAYBOOK_SOURCE_CEL,
+  PLAYBOOK_SOURCE_CEL_MESSAGE,
+} from '../src/playbooks';
+import { REF_CEL_CLUSTER_KIND_NO_NAMESPACE } from '../src/refs';
 
 // biome-ignore lint/suspicious/noExplicitAny: JSON-schema tree, deliberately untyped
 type JSONSchemaNode = Record<string, any>;
@@ -68,11 +78,13 @@ function preserveUnknownFields(node: JSONSchemaNode) {
     Object.keys(node.additionalProperties).length === 0 &&
     !node.properties
   ) {
+    // biome-ignore lint/performance/noDelete: one-off codegen script, not a hot path.
     delete node.additionalProperties;
     node['x-kubernetes-preserve-unknown-fields'] = true;
   }
   for (const key of ['properties']) {
-    if (node[key]) for (const v of Object.values(node[key])) preserveUnknownFields(v as JSONSchemaNode);
+    if (node[key])
+      for (const v of Object.values(node[key])) preserveUnknownFields(v as JSONSchemaNode);
   }
   if (node.items) preserveUnknownFields(node.items);
   if (node.anyOf) for (const v of node.anyOf) preserveUnknownFields(v);
@@ -89,12 +101,16 @@ function preserveUnknownFields(node: JSONSchemaNode) {
 function stripAdditionalPropertiesWithProperties(node: JSONSchemaNode) {
   if (!node || typeof node !== 'object') return;
   if (node.properties && 'additionalProperties' in node) {
+    // biome-ignore lint/performance/noDelete: one-off codegen script, not a hot path.
     delete node.additionalProperties;
   }
-  if (node.properties) for (const v of Object.values(node.properties)) stripAdditionalPropertiesWithProperties(v as JSONSchemaNode);
+  if (node.properties)
+    for (const v of Object.values(node.properties))
+      stripAdditionalPropertiesWithProperties(v as JSONSchemaNode);
   if (node.items) stripAdditionalPropertiesWithProperties(node.items);
   for (const combinator of ['anyOf', 'oneOf', 'allOf']) {
-    if (node[combinator]) for (const v of node[combinator]) stripAdditionalPropertiesWithProperties(v);
+    if (node[combinator])
+      for (const v of node[combinator]) stripAdditionalPropertiesWithProperties(v);
   }
 }
 
@@ -108,8 +124,12 @@ function annotateConditions(statusRoot: JSONSchemaNode) {
 }
 
 function toJsonSchema(schema: import('zod').ZodTypeAny): JSONSchemaNode {
-  const out = zodToJsonSchema(schema, { target: 'openApi3', $refStrategy: 'none' }) as JSONSchemaNode;
+  const out = zodToJsonSchema(schema, {
+    target: 'openApi3',
+    $refStrategy: 'none',
+  }) as JSONSchemaNode;
   // zod-to-json-schema emits a top-level $schema key that CRD schemas don't want.
+  // biome-ignore lint/performance/noDelete: one-off codegen script, not a hot path.
   delete out.$schema;
   return out;
 }
@@ -158,7 +178,8 @@ const CEL_EXTRAS: Record<string, CelExtra[]> = {
     {
       path: ['groups', '[]', 'hostSources', '[]'],
       rule: HOST_SOURCE_CEL_NAMESPACED_PARENT,
-      message: 'namespace must be absent for kind AnsibleHost on a namespaced AnsibleInventory (always own namespace)',
+      message:
+        'namespace must be absent for kind AnsibleHost on a namespaced AnsibleInventory (always own namespace)',
     },
   ],
   ClusterAnsibleInventory: [
@@ -169,8 +190,16 @@ const CEL_EXTRAS: Record<string, CelExtra[]> = {
     },
   ],
   AnsibleRun: [
-    { path: ['playbookRef'], rule: REF_CEL_CLUSTER_KIND_NO_NAMESPACE, message: 'namespace must be absent when kind is a Cluster* kind' },
-    { path: ['inventoryRef'], rule: REF_CEL_CLUSTER_KIND_NO_NAMESPACE, message: 'namespace must be absent when kind is a Cluster* kind' },
+    {
+      path: ['playbookRef'],
+      rule: REF_CEL_CLUSTER_KIND_NO_NAMESPACE,
+      message: 'namespace must be absent when kind is a Cluster* kind',
+    },
+    {
+      path: ['inventoryRef'],
+      rule: REF_CEL_CLUSTER_KIND_NO_NAMESPACE,
+      message: 'namespace must be absent when kind is a Cluster* kind',
+    },
   ],
 };
 
@@ -260,7 +289,16 @@ function writeHelmCrdTemplate(chartCrdsDir: string, fileName: string, crd: JSONS
 function main() {
   const outDir = join(import.meta.dir, '..', '..', '..', 'crds');
   mkdirSync(outDir, { recursive: true });
-  const chartCrdsDir = join(import.meta.dir, '..', '..', '..', 'charts', 'a5e', 'templates', 'crds');
+  const chartCrdsDir = join(
+    import.meta.dir,
+    '..',
+    '..',
+    '..',
+    'charts',
+    'a5e',
+    'templates',
+    'crds',
+  );
   mkdirSync(chartCrdsDir, { recursive: true });
 
   const files: string[] = [];

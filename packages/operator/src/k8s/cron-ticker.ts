@@ -34,12 +34,18 @@ export class CronTicker implements Controller {
     if (this.ticking) return; // previous tick still running (e.g. many jobs, slow API) — skip, don't pile up
     this.ticking = true;
     try {
-      const { items } = await this.client.listAllNamespaces<CustomResource<unknown, unknown>>(this.descriptor, 'self');
+      const { items } = await this.client.listAllNamespaces<CustomResource<unknown, unknown>>(
+        this.descriptor,
+        'self',
+      );
       for (const obj of items) {
         try {
           await this.reconcile(obj);
         } catch (err) {
-          console.error(`cron-ticker: reconcile failed for ${obj.metadata.namespace}/${obj.metadata.name}:`, err);
+          console.error(
+            `cron-ticker: reconcile failed for ${obj.metadata.namespace}/${obj.metadata.name}:`,
+            err,
+          );
         }
       }
     } catch (err) {

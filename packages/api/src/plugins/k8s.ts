@@ -1,7 +1,7 @@
-import * as k8s from '@kubernetes/client-node';
-import { setHeaderOptions } from '@kubernetes/client-node';
 import { CustomResourceClient, loadKubeConfig, loadKubeConfigFromToken } from '@a5e/k8s-client';
 import type { CallerIdentity } from '@a5e/k8s-client';
+import * as k8s from '@kubernetes/client-node';
+import { setHeaderOptions } from '@kubernetes/client-node';
 
 /**
  * Local dev against OrbStack's default kubeconfig (mTLS) doesn't work under Bun (see
@@ -17,7 +17,9 @@ function createKubeConfig(): k8s.KubeConfig {
       caFile: process.env.API_KUBE_CA_FILE,
     });
   }
-  return loadKubeConfig({ mode: process.env.KUBERNETES_SERVICE_HOST ? 'in-cluster' : 'kubeconfig' });
+  return loadKubeConfig({
+    mode: process.env.KUBERNETES_SERVICE_HOST ? 'in-cluster' : 'kubeconfig',
+  });
 }
 
 export const kc = createKubeConfig();

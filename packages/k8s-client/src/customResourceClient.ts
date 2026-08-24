@@ -1,7 +1,7 @@
+import type { ResourceDescriptor } from '@a5e/schemas';
 import * as k8s from '@kubernetes/client-node';
 import { setHeaderOptions } from '@kubernetes/client-node';
 import type { ConfigurationOptions, ObservableMiddleware } from '@kubernetes/client-node';
-import type { ResourceDescriptor } from '@a5e/schemas';
 import { API_GROUP, API_VERSION } from './crdRegistry';
 
 /**
@@ -106,7 +106,8 @@ export class CustomResourceClient {
     const raw =
       descriptor.scope === 'Namespaced'
         ? await (() => {
-            if (!namespace) throw new Error(`${descriptor.kind} is namespaced — namespace is required`);
+            if (!namespace)
+              throw new Error(`${descriptor.kind} is namespaced — namespace is required`);
             return this.api.listNamespacedCustomObject(
               {
                 group: API_GROUP,
@@ -204,7 +205,14 @@ export class CustomResourceClient {
     if (descriptor.scope === 'Namespaced') {
       if (!namespace) throw new Error(`${descriptor.kind} is namespaced — namespace is required`);
       return (await this.api.replaceNamespacedCustomObject(
-        { group: API_GROUP, version: API_VERSION, namespace, plural: descriptor.plural, name, body },
+        {
+          group: API_GROUP,
+          version: API_VERSION,
+          namespace,
+          plural: descriptor.plural,
+          name,
+          body,
+        },
         withImpersonation(identity),
       )) as T;
     }
@@ -225,7 +233,14 @@ export class CustomResourceClient {
     if (descriptor.scope === 'Namespaced') {
       if (!namespace) throw new Error(`${descriptor.kind} is namespaced — namespace is required`);
       return (await this.api.patchNamespacedCustomObject(
-        { group: API_GROUP, version: API_VERSION, namespace, plural: descriptor.plural, name, body: patchBody },
+        {
+          group: API_GROUP,
+          version: API_VERSION,
+          namespace,
+          plural: descriptor.plural,
+          name,
+          body: patchBody,
+        },
         opts,
       )) as T;
     }
@@ -247,7 +262,14 @@ export class CustomResourceClient {
     if (descriptor.scope === 'Namespaced') {
       if (!namespace) throw new Error(`${descriptor.kind} is namespaced — namespace is required`);
       return (await this.api.patchNamespacedCustomObjectStatus(
-        { group: API_GROUP, version: API_VERSION, namespace, plural: descriptor.plural, name, body },
+        {
+          group: API_GROUP,
+          version: API_VERSION,
+          namespace,
+          plural: descriptor.plural,
+          name,
+          body,
+        },
         opts,
       )) as T;
     }

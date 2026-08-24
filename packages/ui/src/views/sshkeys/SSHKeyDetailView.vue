@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import type { AnsibleSSHKeySpec, AnsibleSSHKeyStatus, CustomResource } from '@a5e/schemas';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import type { AnsibleSSHKeySpec, AnsibleSSHKeyStatus, CustomResource } from '@a5e/schemas';
 import { useSSHKeyStore } from '../../stores/resources';
 
 const props = defineProps<{ namespace: string; name: string }>();

@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue';
-import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
 import { API_GROUP_VERSION } from '@a5e/schemas';
 import type { AnsibleInventorySpec } from '@a5e/schemas';
-import { useClusterInventoryStore } from '../../stores/resources';
+import { ElMessage } from 'element-plus';
+import { onMounted, reactive } from 'vue';
+import { useRouter } from 'vue-router';
 import HostSourceListEditor from '../../components/HostSourceListEditor.vue';
+import { useClusterInventoryStore } from '../../stores/resources';
 
 const props = defineProps<{ name?: string }>();
 const router = useRouter();
 const store = useClusterInventoryStore();
 
 const isEdit = Boolean(props.name);
-const form = reactive<{ name: string; spec: AnsibleInventorySpec }>({ name: props.name ?? '', spec: { groups: [] } });
+const form = reactive<{ name: string; spec: AnsibleInventorySpec }>({
+  name: props.name ?? '',
+  spec: { groups: [] },
+});
 
 onMounted(async () => {
   if (isEdit && props.name) {

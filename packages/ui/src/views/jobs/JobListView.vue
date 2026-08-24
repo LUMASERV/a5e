@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import type { AnsibleJobSpec, AnsibleJobStatus, CustomResource } from '@a5e/schemas';
 import { ElMessage } from 'element-plus';
 import { useRouter } from 'vue-router';
-import type { AnsibleJobSpec, AnsibleJobStatus, CustomResource } from '@a5e/schemas';
 import { apiClient } from '../../api/client';
+import ResourceListView from '../../components/ResourceListView.vue';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useJobStore } from '../../stores/resources';
-import ResourceListView from '../../components/ResourceListView.vue';
 
 const router = useRouter();
 const namespaceStore = useNamespaceStore();

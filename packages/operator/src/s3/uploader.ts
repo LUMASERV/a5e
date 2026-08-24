@@ -31,7 +31,11 @@ export function resolveGlobalS3Config(): S3Config | undefined {
  * run Pods never see them (plan §4.2's credential-isolation rationale — run Pods execute
  * arbitrary user-supplied playbook/git content, so S3 write credentials must stay operator-side).
  */
-export async function uploadRunLog(config: S3Config, key: string, content: string): Promise<{ sizeBytes: number }> {
+export async function uploadRunLog(
+  config: S3Config,
+  key: string,
+  content: string,
+): Promise<{ sizeBytes: number }> {
   const client = new Bun.S3Client({
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
