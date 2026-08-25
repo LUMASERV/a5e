@@ -27,6 +27,8 @@ rules:
       - ansibleruns
       - ansiblejobs
       - changerequests
+      - groups
+      - users
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["a5e.k8s.rocks"]
     resources:
@@ -41,6 +43,8 @@ rules:
       - ansibleruns/status
       - ansiblejobs/status
       - changerequests/status
+      - groups/status
+      - users/status
     verbs: ["get", "update", "patch"]
   # Populates the UI's namespace picker (modules/ancillary.ts) — not gated by the permission
   # engine, since it's only ever used to list namespaces to pick from, not to decide what
