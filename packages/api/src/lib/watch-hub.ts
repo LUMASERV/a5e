@@ -1,5 +1,4 @@
 import {
-  type CallerIdentity,
   type CustomResourceClient,
   type WatchEvent,
   allNamespacesPath,
@@ -9,24 +8,27 @@ import {
 import type { CustomResource, ResourceDescriptor } from '@a5e/schemas';
 import type * as k8s from '@kubernetes/client-node';
 
-function identityKey(identity: CallerIdentity): string {
-  if (identity === 'self') return 'self';
-  return `${identity.impersonateUser}|${(identity.impersonateGroups ?? []).join(',')}`;
+type Obj = CustomResource<unknown, unknown>;
+
+interface Subscriber {
+  filter: (obj: Obj) => boolean;
+  onEvent: (event: WatchEvent<Obj>) => void;
 }
 
 interface HubEntry {
-  subscribers: Set<(event: WatchEvent<CustomResource<unknown, unknown>>) => void>;
+  subscribers: Set<Subscriber>;
   watchHandle: ReturnType<typeof watchReconnecting> | null;
 }
 
 /**
- * Multiplexes SSE subscribers onto a single underlying k8s watch per (descriptor, namespace,
- * labelSelector) combination — but IMPORTANTLY also keyed by caller identity. A shared watch
- * established under one user's impersonated identity must never be reused for a different
- * user: RBAC is enforced by the k8s API server on the watch itself (impersonated per plan §4.4),
- * so sharing across identities would leak data a second user isn't authorized to see. Sharing
- * therefore only kicks in across multiple tabs/reconnects of the SAME logged-in user — still a
- * meaningful reduction in k8s-side watch count, just not a global one.
+ * Multiplexes SSE subscribers onto a single underlying k8s watch per (descriptor, namespace)
+ * combination. Every upstream watch goes out as the API's own identity (`'self'`) now that k8s
+ * RBAC/impersonation no longer decides authorization (see auth/permission-engine.ts) — it's
+ * therefore broad/unfiltered by design, and each subscriber applies its OWN `filter` predicate
+ * (built from that connection's effective permissions, snapshotted at subscribe time) before an
+ * event is ever relayed down its SSE stream. This is a real efficiency win over the old
+ * per-identity keying: many users watching the same kind/namespace now share exactly one upstream
+ * k8s watch regardless of their individual permission scopes.
  */
 export class WatchHub {
   private hubs = new Map<string, HubEntry>();
@@ -36,37 +38,22 @@ export class WatchHub {
     private readonly client: CustomResourceClient,
   ) {}
 
-  /** Returns an unsubscribe function. Also emits an initial synthetic snapshot via `onInitial`. */
   async subscribe(
     descriptor: ResourceDescriptor,
-    identity: CallerIdentity,
     namespace: string | undefined,
-    labelSelector: string | undefined,
-    onEvent: (event: WatchEvent<CustomResource<unknown, unknown>>) => void,
-  ): Promise<{ unsubscribe: () => void; initialResourceVersion: string | undefined }> {
-    const key = `${identityKey(identity)}/${descriptor.kind}/${namespace ?? ''}/${labelSelector ?? ''}`;
+    filter: (obj: Obj) => boolean,
+    onEvent: (event: WatchEvent<Obj>) => void,
+  ): Promise<{ unsubscribe: () => void }> {
+    const key = `${descriptor.kind}/${namespace ?? ''}`;
     let hub = this.hubs.get(key);
-    let initialResourceVersion: string | undefined;
 
     if (!hub) {
       const isAllNamespaces = descriptor.scope === 'Namespaced' && !namespace;
+      // No labelSelector here — the upstream watch must see everything; filtering moves downstream
+      // to each subscriber's own `filter` predicate.
       const result = isAllNamespaces
-        ? await this.client.listAllNamespaces<CustomResource<unknown, unknown>>(
-            descriptor,
-            identity,
-            {
-              labelSelector,
-            },
-          )
-        : await this.client.list<CustomResource<unknown, unknown>>(
-            descriptor,
-            identity,
-            namespace,
-            {
-              labelSelector,
-            },
-          );
-      initialResourceVersion = result.resourceVersion;
+        ? await this.client.listAllNamespaces<Obj>(descriptor, 'self')
+        : await this.client.list<Obj>(descriptor, 'self', namespace);
 
       hub = { subscribers: new Set(), watchHandle: null };
       this.hubs.set(key, hub);
@@ -78,13 +65,15 @@ export class WatchHub {
             : allNamespacesPath(descriptor)
           : resourcePath(descriptor);
 
-      hub.watchHandle = watchReconnecting<CustomResource<unknown, unknown>>(
+      hub.watchHandle = watchReconnecting<Obj>(
         this.kc,
         path,
         result.resourceVersion,
-        identity,
+        'self',
         (event) => {
-          for (const subscriber of hub!.subscribers) subscriber(event);
+          for (const subscriber of hub!.subscribers) {
+            if (subscriber.filter(event.object)) subscriber.onEvent(event);
+          }
         },
         {
           onExpired: () => {
@@ -99,12 +88,12 @@ export class WatchHub {
       );
     }
 
-    hub.subscribers.add(onEvent);
+    const subscriber: Subscriber = { filter, onEvent };
+    hub.subscribers.add(subscriber);
     const capturedHub = hub;
     return {
-      initialResourceVersion,
       unsubscribe: () => {
-        capturedHub.subscribers.delete(onEvent);
+        capturedHub.subscribers.delete(subscriber);
         if (capturedHub.subscribers.size === 0) {
           capturedHub.watchHandle?.stop();
           this.hubs.delete(key);

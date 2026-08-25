@@ -46,7 +46,7 @@ export async function resolveOidcConfig(): Promise<OidcConfig | undefined> {
     // narrow, universally-safe baseline. Two features need scopes widened beyond it:
     // group-based RBAC needs "groups" (or whatever the IdP calls it, via OIDC_GROUPS_CLAIM if
     // not literally "groups" in the token) requested and present as a claim; local-account
-    // linking by email (auth/local-accounts.ts) needs "email" requested so the token actually
+    // linking by email (auth/user-store.ts) needs "email" requested so the token actually
     // carries an email claim to match against.
     scopes: stored?.scopes || process.env.OIDC_SCOPES || 'openid profile',
     groupsClaim: process.env.OIDC_GROUPS_CLAIM ?? 'groups',
@@ -143,11 +143,11 @@ export interface VerifiedIdentity {
    * reused, or be absent depending on requested scopes), so this is always the primary
    * impersonation identity, not just a fallback. */
   sub: string;
-  /** Only for display and for local-account linking-by-email (auth/local-accounts.ts) — never
+  /** Only for display and for local-account linking-by-email (auth/user-store.ts) — never
    * used as the impersonation identity itself. Only present if the "email" scope was requested. */
   email?: string;
   /** True only if the IdP itself asserts `email_verified: true` on the token — linking-by-email
-   * (auth/local-accounts.ts) must never trust an unverified `email` claim, since some IdPs let a
+   * (auth/user-store.ts) must never trust an unverified `email` claim, since some IdPs let a
    * user set an arbitrary/unverified email on their own profile, which would otherwise let an
    * attacker link to (and inherit the role/groups of) any local account by guessing its email. */
   emailVerified: boolean;

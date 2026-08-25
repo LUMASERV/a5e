@@ -1,4 +1,4 @@
-import { createLocalAccount, listLocalAccounts } from './local-accounts';
+import { createLocalAccount, hasAnyLocalAccount } from './user-store';
 
 /**
  * Creates exactly one local admin account on first startup, if no local accounts exist yet —
@@ -6,15 +6,14 @@ import { createLocalAccount, listLocalAccounts } from './local-accounts';
  * authenticated every request as a fixed identity regardless of any real login and was too easy
  * to leave on by accident). Never touches an existing account, so BOOTSTRAP_ADMIN_USERNAME/
  * PASSWORD can be left set indefinitely (e.g. in a local .env) — this only ever does anything
- * the very first time the local-accounts store is empty.
+ * the very first time no local account exists yet (see auth/user-store.ts).
  */
 export async function bootstrapAdminAccount(): Promise<void> {
   const username = process.env.BOOTSTRAP_ADMIN_USERNAME;
   const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
   if (!username || !password) return;
 
-  const existing = await listLocalAccounts().catch(() => []);
-  if (existing.length > 0) return;
+  if (await hasAnyLocalAccount().catch(() => false)) return;
 
   await createLocalAccount({
     username,

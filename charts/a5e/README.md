@@ -1,7 +1,7 @@
 # a5e
 
 Helm chart for A5E, a Kubernetes-native Ansible Semaphore alternative: deploys the operator, the
-API (OIDC BFF + impersonated CRUD/watch relay), the UI, the 10 `a5e.k8s.rocks` CRDs, and
+API (OIDC BFF + in-app-permission-gated CRUD/watch relay), the UI, the 13 `a5e.k8s.rocks` CRDs, and
 the RBAC each component needs.
 
 ## Install
@@ -10,6 +10,7 @@ the RBAC each component needs.
 helm install a5e charts/a5e \
   --namespace a5e-system --create-namespace \
   --set image.registry=registry.lumaserv.dev/public/a5e \
+  --set image.tag=0.2.0 \
   --set api.uiOrigin=https://a5e.example.com \
   --set api.bootstrapAdmin.username=admin \
   --set api.bootstrapAdmin.password=change-me \
@@ -18,10 +19,10 @@ helm install a5e charts/a5e \
   --set ui.ingress.hosts[0].host=a5e.example.com
 ```
 
-`api.bootstrapAdmin` creates exactly one local admin account the very first time the
-local-accounts store is empty — otherwise there's no way to log in at all to configure anything
-else. It's safe to leave set; rotate/remove that password via Settings → Local accounts
-afterward instead of relying on it again.
+`api.bootstrapAdmin` creates exactly one local admin account the very first time no local account
+exists yet — otherwise there's no way to log in at all to configure anything else. It's safe to
+leave set; rotate/remove that password via Settings → Users afterward instead of relying on it
+again.
 
 OIDC is configured from the Settings page after install (issuer/clientId/clientSecret, stored in
 a Secret the API manages itself), not chart values — the redirect URI to register at your IdP is
@@ -68,11 +69,14 @@ would on any other Ingress, nothing chart-specific to configure.
   Zod schemas. Run `bun run generate` in `packages/schemas` after any schema change and commit
   both outputs together.
 - There's no dev-mode auth bypass — every login is a real OIDC round-trip or a real local
-  account (see `packages/api/src/auth/local-accounts.ts`); `api.bootstrapAdmin` is how the first
-  one gets created.
+  account (a `User` CRD plus a password hash in a narrowly-scoped Secret — see
+  `packages/api/src/auth/user-store.ts`/`user-passwords.ts`); `api.bootstrapAdmin` is how the
+  first one gets created.
 - The API Deployment runs a single replica by design — its session store is in-memory
   (`auth/session-store.ts`); don't raise `api.replicaCount` without moving sessions to a shared
   store first.
-- Actual authorization is real Kubernetes RBAC: after install, map your OIDC group claims to
-  RoleBindings/ClusterRoleBindings on the CRDs yourself — a user who logs in successfully but has
-  no bindings will see everything 403.
+- Authorization is entirely in-app, not Kubernetes RBAC: the API acts as its own identity
+  (`a5e-api`'s ServiceAccount) for every Kubernetes call and decides allow/deny itself via each
+  user's/`Group`'s `Permission` grants (`auth/permission-engine.ts`) — a user who logs in
+  successfully but has no grants (and isn't `role: admin`, which bypasses this entirely) will see
+  everything 403 until an admin grants them permissions directly or via a `Group`, in Settings.

@@ -1,9 +1,12 @@
+import { permissionSchema } from '@a5e/schemas';
 import { authorize } from '../auth/authorize';
-import { createLocalAccount } from '../auth/local-accounts';
 import { APP_ROLES, type AppRole } from '../auth/roles';
 import { extractBearerToken } from '../auth/session';
-import { deleteUser, listUsers, setUserRole } from '../auth/users';
+import { createLocalAccount, deleteUser, listUsers, updateUser } from '../auth/user-store';
+import type { UserUpdate } from '../auth/user-store';
 import type { AnyElysia } from '../lib/elysia-types';
+
+const permissionsPatchSchema = permissionSchema.array();
 
 function isAppRole(value: unknown): value is AppRole {
   return typeof value === 'string' && (APP_ROLES as readonly string[]).includes(value);
@@ -35,9 +38,16 @@ export function registerUsersSettingsRoutes(app: AnyElysia): AnyElysia {
         impersonateGroups?: string[];
         role?: string;
       };
-      if (!b.username?.trim() || !b.password) {
+      if (!b.username?.trim()) {
         set.status = 400;
-        return { error: 'username and password are required' };
+        return { error: 'username is required' };
+      }
+      // Password is optional (pre-provisioning a user ahead of their first SSO login — see
+      // LocalAccount.passwordHash's doc comment), but the account needs SOME way to ever be
+      // reached: without a password there must at least be an email for an SSO login to link to.
+      if (!b.password && !b.email?.trim()) {
+        set.status = 400;
+        return { error: 'either a password or an email (for SSO account linking) is required' };
       }
       const role = isAppRole(b.role) ? b.role : 'none';
 
@@ -62,12 +72,63 @@ export function registerUsersSettingsRoutes(app: AnyElysia): AnyElysia {
       const auth = await authorize(extractBearerToken(headers), 'admin');
       if (auth instanceof Response) return auth;
 
-      const b = body as { role?: string };
-      if (!isAppRole(b.role)) {
+      const id = decodeURIComponent(params.id);
+      const b = body as {
+        username?: string;
+        role?: string;
+        email?: string;
+        displayName?: string;
+        impersonateGroups?: string[];
+        password?: string;
+        permissions?: unknown;
+      };
+
+      if (b.role !== undefined && !isAppRole(b.role)) {
         set.status = 400;
         return { error: `role must be one of: ${APP_ROLES.join(', ')}` };
       }
-      await setUserRole(decodeURIComponent(params.id), b.role);
+      let permissions: UserUpdate['permissions'];
+      if (b.permissions !== undefined) {
+        const parsed = permissionsPatchSchema.safeParse(b.permissions);
+        if (!parsed.success) {
+          set.status = 400;
+          return { error: `invalid permissions: ${parsed.error.message}` };
+        }
+        permissions = parsed.data;
+      }
+      // An SSO-only row has no local account behind it, so only role/permissions are meaningful —
+      // UNLESS `username` is also given, which promotes it into a real linked local account in
+      // this same call (see auth/users.ts's updateUser), at which point every local-account field
+      // becomes valid too. Reject rather than silently drop fields, so an admin editing what looks
+      // like a normal row doesn't think an email/password/groups change took effect when it didn't.
+      const hasNonRoleField =
+        b.email !== undefined ||
+        b.displayName !== undefined ||
+        b.impersonateGroups !== undefined ||
+        b.password !== undefined;
+      if (id.startsWith('oidc:') && hasNonRoleField && !b.username?.trim()) {
+        set.status = 400;
+        return {
+          error:
+            'only role and permissions can be set for an SSO-only identity — provide a username to give it a local account first',
+        };
+      }
+
+      const patch: UserUpdate = {
+        username: b.username?.trim() || undefined,
+        role: isAppRole(b.role) ? b.role : undefined,
+        email: b.email?.trim(),
+        displayName: b.displayName?.trim(),
+        impersonateGroups: b.impersonateGroups,
+        password: b.password || undefined,
+        permissions,
+      };
+      try {
+        await updateUser(id, patch);
+      } catch (err) {
+        set.status = 400;
+        return { error: (err as Error).message };
+      }
       return { ok: true };
     })
 

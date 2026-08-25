@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { apiClient } from '../api/client';
 
 interface AppUser {
@@ -14,18 +15,10 @@ interface AppUser {
   hasPassword: boolean;
 }
 
+const router = useRouter();
 const users = ref<AppUser[]>([]);
 const loading = ref(true);
-const creating = ref(false);
-
-const form = reactive({
-  username: '',
-  password: '',
-  email: '',
-  displayName: '',
-  groupsText: '',
-  role: 'user',
-});
+const knownGroups = ref<string[]>([]);
 
 async function load() {
   loading.value = true;
@@ -39,48 +32,12 @@ async function load() {
   }
 }
 
-async function create() {
-  if (!form.username.trim() || !form.password) {
-    ElMessage.error('Username and password are required');
-    return;
-  }
-  creating.value = true;
+async function loadKnownGroups() {
   try {
-    await apiClient.create('/config/users', {
-      username: form.username.trim(),
-      password: form.password,
-      email: form.email.trim() || undefined,
-      displayName: form.displayName.trim() || undefined,
-      impersonateGroups: form.groupsText
-        .split(',')
-        .map((g) => g.trim())
-        .filter(Boolean),
-      role: form.role,
-    });
-    Object.assign(form, {
-      username: '',
-      password: '',
-      email: '',
-      displayName: '',
-      groupsText: '',
-      role: 'user',
-    });
-    ElMessage.success('Created');
-    await load();
-  } catch (err) {
-    ElMessage.error((err as Error).message);
-  } finally {
-    creating.value = false;
-  }
-}
-
-async function setRole(id: string, role: string) {
-  try {
-    await apiClient.patch(`/config/users/${encodeURIComponent(id)}`, { role });
-    ElMessage.success('Updated');
-    await load();
-  } catch (err) {
-    ElMessage.error((err as Error).message);
+    const result = await apiClient.get<{ items: { name: string }[] }>('/config/groups');
+    knownGroups.value = result.items.map((g) => g.name);
+  } catch {
+    // Non-fatal — the group picker just falls back to allow-create-only if this fails.
   }
 }
 
@@ -100,22 +57,81 @@ async function remove(user: AppUser) {
   }
 }
 
+// --- Create dialog — kept as a modal deliberately: it's a short, fixed set of fields with no
+// Permissions editor, unlike editing (see UserEditView.vue, a full page precisely because that one
+// does need the room). ---
+const createDialogVisible = ref(false);
+const creating = ref(false);
+const createForm = reactive({
+  username: '',
+  password: '',
+  email: '',
+  displayName: '',
+  groups: [] as string[],
+  role: 'user',
+});
+
+function openCreate() {
+  Object.assign(createForm, {
+    username: '',
+    password: '',
+    email: '',
+    displayName: '',
+    groups: [],
+    role: 'user',
+  });
+  createDialogVisible.value = true;
+  loadKnownGroups();
+}
+
+async function create() {
+  if (!createForm.username.trim()) {
+    ElMessage.error('Username is required');
+    return;
+  }
+  if (!createForm.password && !createForm.email.trim()) {
+    ElMessage.error('Either a password or an email (for SSO account linking) is required');
+    return;
+  }
+  creating.value = true;
+  try {
+    await apiClient.create('/config/users', {
+      username: createForm.username.trim(),
+      password: createForm.password || undefined,
+      email: createForm.email.trim() || undefined,
+      displayName: createForm.displayName.trim() || undefined,
+      impersonateGroups: createForm.groups,
+      role: createForm.role,
+    });
+    ElMessage.success('Created');
+    createDialogVisible.value = false;
+    await load();
+  } catch (err) {
+    ElMessage.error((err as Error).message);
+  } finally {
+    creating.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
 <template>
   <div>
-    <h2>Users</h2>
-    <p style="color: var(--el-text-color-secondary); max-width: 700px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
+      <h2 style="margin: 0">Users</h2>
+      <el-button type="primary" @click="openCreate">New User</el-button>
+    </div>
+    <p style="color: var(--el-text-color-secondary)">
       Every identity that can log in: local username/password accounts, and SSO identities that
       have logged in at least once. A local account whose email matches an SSO login gets linked
       automatically (needs the "email" scope enabled in OIDC settings) and shows as a single row
       with both a username and an SSO identity — everyone else has just one or the other. New
-      identities appear here with role "none" on first SSO login, or must be created below for
-      local login.
+      identities appear here with role "none" on first SSO login. Editing an SSO-only row lets you
+      give it a username, turning it into a real local account it can be given a password for.
     </p>
 
-    <el-table v-loading="loading" :data="users" style="width: 100%; max-width: 1000px; margin-bottom: 24px">
+    <el-table v-loading="loading" :data="users" style="width: 100%">
       <el-table-column label="Username" width="140">
         <template #default="{ row }">{{ row.username ?? '—' }}</template>
       </el-table-column>
@@ -125,55 +141,69 @@ onMounted(load);
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="Name / Email">
-        <template #default="{ row }">{{ row.displayName ?? row.email ?? '—' }}</template>
+      <el-table-column label="Name">
+        <template #default="{ row }">{{ row.displayName ?? '—' }}</template>
+      </el-table-column>
+      <el-table-column label="Email">
+        <template #default="{ row }">{{ row.email ?? '—' }}</template>
       </el-table-column>
       <el-table-column label="Groups">
         <template #default="{ row }">{{ row.impersonateGroups.join(', ') || '—' }}</template>
       </el-table-column>
-      <el-table-column label="Role" width="120">
+      <el-table-column label="Password" width="90">
         <template #default="{ row }">
-          <el-select :model-value="row.role" style="width: 100px" @update:model-value="(v: string) => setRole(row.id, v)">
-            <el-option label="none" value="none" />
-            <el-option label="user" value="user" />
-            <el-option label="admin" value="admin" />
-          </el-select>
+          <el-tag v-if="row.username" :type="row.hasPassword ? 'success' : 'info'" size="small">
+            {{ row.hasPassword ? 'set' : 'none' }}
+          </el-tag>
+          <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="Actions" width="100">
+      <el-table-column label="Role" width="90">
         <template #default="{ row }">
+          <el-tag :type="row.role === 'admin' ? 'danger' : row.role === 'user' ? 'success' : 'info'" size="small">
+            {{ row.role }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="Actions" width="150">
+        <template #default="{ row }">
+          <el-button size="small" @click="router.push(`/settings/users/${encodeURIComponent(row.id)}/edit`)">Edit</el-button>
           <el-button size="small" type="danger" @click="remove(row)">Remove</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <h3>New local account</h3>
-    <el-form label-width="160px" style="max-width: 700px">
-      <el-form-item label="Username">
-        <el-input v-model="form.username" />
-      </el-form-item>
-      <el-form-item label="Password">
-        <el-input v-model="form.password" type="password" show-password />
-      </el-form-item>
-      <el-form-item label="Email">
-        <el-input v-model="form.email" placeholder="for SSO account linking, optional" />
-      </el-form-item>
-      <el-form-item label="Display name">
-        <el-input v-model="form.displayName" placeholder="defaults to username" />
-      </el-form-item>
-      <el-form-item label="Groups">
-        <el-input v-model="form.groupsText" placeholder="comma-separated, e.g. a5e-admins" />
-      </el-form-item>
-      <el-form-item label="Role">
-        <el-select v-model="form.role" style="width: 120px">
-          <el-option label="none" value="none" />
-          <el-option label="user" value="user" />
-          <el-option label="admin" value="admin" />
-        </el-select>
-      </el-form-item>
-      <el-form-item>
+    <el-dialog v-model="createDialogVisible" title="New User" width="520px">
+      <el-form label-width="140px">
+        <el-form-item label="Username">
+          <el-input v-model="createForm.username" />
+        </el-form-item>
+        <el-form-item label="Password">
+          <el-input v-model="createForm.password" type="password" show-password placeholder="optional — see note above" />
+        </el-form-item>
+        <el-form-item label="Email">
+          <el-input v-model="createForm.email" placeholder="for SSO account linking, optional" />
+        </el-form-item>
+        <el-form-item label="Display name">
+          <el-input v-model="createForm.displayName" placeholder="defaults to username" />
+        </el-form-item>
+        <el-form-item label="Groups">
+          <el-select v-model="createForm.groups" multiple filterable allow-create default-first-option style="width: 100%">
+            <el-option v-for="g in knownGroups" :key="g" :label="g" :value="g" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Role">
+          <el-select v-model="createForm.role" style="width: 120px">
+            <el-option label="none" value="none" />
+            <el-option label="user" value="user" />
+            <el-option label="admin" value="admin" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialogVisible = false">Cancel</el-button>
         <el-button type="primary" :loading="creating" @click="create">Create</el-button>
-      </el-form-item>
-    </el-form>
+      </template>
+    </el-dialog>
   </div>
 </template>

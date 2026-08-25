@@ -31,6 +31,7 @@ async function triggerNow(row: CustomResource<AnsibleJobSpec, AnsibleJobStatus>)
     :namespaced="true"
     :namespace="namespaceStore.current"
     create-path="/jobs/new"
+    resource-type="AnsibleJob"
     :edit-path="(item) => `/jobs/${item.metadata.namespace}/${item.metadata.name}/edit`"
   >
     <template #columns>

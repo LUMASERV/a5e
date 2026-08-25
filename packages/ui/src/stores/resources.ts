@@ -12,6 +12,8 @@ import type {
   AnsibleRunStatus,
   AnsibleSSHKeySpec,
   AnsibleSSHKeyStatus,
+  ChangeRequestSpec,
+  ChangeRequestStatus,
   ClusterAnsibleSSHKeySpec,
 } from '@a5e/schemas';
 import { createResourceStore } from './createResourceStore';
@@ -60,4 +62,9 @@ export const useRunStore = createResourceStore<AnsibleRunSpec, AnsibleRunStatus>
 export const useJobStore = createResourceStore<AnsibleJobSpec, AnsibleJobStatus>(
   'job',
   RESOURCE_DESCRIPTORS_BY_KIND.AnsibleJob!,
+);
+
+export const useChangeRequestStore = createResourceStore<ChangeRequestSpec, ChangeRequestStatus>(
+  'changeRequest',
+  RESOURCE_DESCRIPTORS_BY_KIND.ChangeRequest!,
 );

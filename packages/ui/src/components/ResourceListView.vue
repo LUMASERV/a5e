@@ -4,6 +4,7 @@ import { Search } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useChangeRequestDraftStore } from '../stores/changeRequestDraft';
 
 const props = defineProps<{
   title: string;
@@ -12,18 +13,34 @@ const props = defineProps<{
     loading: boolean;
     error: string | null;
     list: (namespace?: string) => Promise<void>;
-    remove: (name: string, namespace?: string) => Promise<void>;
+    remove: (name: string, namespace?: string, previous?: unknown) => Promise<void>;
     stop: () => void;
   };
   namespaced: boolean;
   namespace?: string;
   createPath: string;
   editPath: (item: CustomResource<unknown, unknown>) => string;
+  /** The CRD kind this list shows — used to cross-reference rows against an active change-request
+   * draft's staged items, so a row with a pending change shows a badge instead of silently still
+   * being there after a staged (not yet applied) delete. */
+  resourceType: string;
   /** Extra per-page predicate ANDed with search/labels — e.g. HostListView's "Enabled" filter. */
   extraFilter?: (item: CustomResource<unknown, unknown>) => boolean;
 }>();
 
 const router = useRouter();
+const draftStore = useChangeRequestDraftStore();
+
+function pendingFor(item: CustomResource<unknown, unknown>): 'update' | 'delete' | undefined {
+  const match = draftStore.items.find(
+    (i) =>
+      i.type === props.resourceType &&
+      i.name === item.metadata.name &&
+      i.namespace === item.metadata.namespace &&
+      i.kind !== 'create',
+  );
+  return match?.kind === 'delete' ? 'delete' : match ? 'update' : undefined;
+}
 
 const search = ref('');
 const labelFilterText = ref('');
@@ -84,8 +101,8 @@ async function onDelete(item: CustomResource<unknown, unknown>) {
     return;
   }
   try {
-    await props.store.remove(item.metadata.name, item.metadata.namespace);
-    ElMessage.success('Deleted');
+    await props.store.remove(item.metadata.name, item.metadata.namespace, item);
+    ElMessage.success(draftStore.isActive ? 'Added to change request draft' : 'Deleted');
   } catch (err) {
     ElMessage.error((err as Error).message);
   }
@@ -131,7 +148,8 @@ defineExpose({ reload });
       <slot name="columns" />
       <el-table-column label="Status" width="140">
         <template #default="{ row }">
-          <el-tag :type="readyStatus(row).type">{{ readyStatus(row).text }}</el-tag>
+          <el-tag v-if="pendingFor(row)" type="warning">Pending {{ pendingFor(row) }}</el-tag>
+          <el-tag v-else :type="readyStatus(row).type">{{ readyStatus(row).text }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="Age" width="160">
@@ -139,7 +157,14 @@ defineExpose({ reload });
       </el-table-column>
       <el-table-column label="Actions" width="100">
         <template #default="{ row }">
-          <el-button size="small" type="danger" @click.stop="onDelete(row)">Delete</el-button>
+          <el-button
+            size="small"
+            type="danger"
+            :disabled="Boolean(pendingFor(row))"
+            @click.stop="onDelete(row)"
+          >
+            Delete
+          </el-button>
         </template>
       </el-table-column>
     </el-table>

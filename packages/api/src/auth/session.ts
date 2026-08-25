@@ -9,9 +9,9 @@ export type SessionIdentity = Exclude<CallerIdentity, 'self'>;
 export interface Session {
   identity: SessionIdentity;
   displayName: string;
-  /** Explicit discriminant for which app-level identity store (auth/local-accounts.ts vs
-   * auth/roles.ts's OIDC-user-roles map) governs this session's role — set once at login time,
-   * never inferred from `identity.impersonateUser`'s string shape. That string is also the literal
+  /** Explicit discriminant for whether this session resolves to a `local-<username>` or
+   * `oidc-<sub>` `User` CR (see auth/user-store.ts) — set once at login time, never inferred from
+   * `identity.impersonateUser`'s string shape. That string is also the literal
    * Kubernetes `Impersonate-User` value cluster admins bind real RBAC to (`local:<username>` or
    * the raw OIDC `sub`), so it can't double as a trust boundary: a maliciously-configured IdP
    * could otherwise issue a `sub` like `local:admin` and get treated as the local admin account

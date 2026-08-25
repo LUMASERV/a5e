@@ -1,0 +1,142 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: changerequests.a5e.k8s.rocks
+spec:
+  group: a5e.k8s.rocks
+  scope: Cluster
+  names:
+    kind: ChangeRequest
+    listKind: ChangeRequestList
+    plural: changerequests
+    singular: changerequest
+    shortNames:
+      - changerequest
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          jsonPath: .status.phase
+          type: string
+        - name: RequestedBy
+          jsonPath: .spec.requestedBy
+          type: string
+        - name: Age
+          jsonPath: .metadata.creationTimestamp
+          type: date
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                requestedBy:
+                  type: string
+                requestedByName:
+                  type: string
+                requestedAt:
+                  type: string
+                reason:
+                  type: string
+                changes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      action:
+                        type: string
+                        enum:
+                          - create
+                          - update
+                          - delete
+                      type:
+                        type: string
+                      namespace:
+                        type: string
+                      name:
+                        type: string
+                      body:
+                        x-kubernetes-preserve-unknown-fields: true
+                    required:
+                      - action
+                      - type
+                  minItems: 1
+              required:
+                - requestedBy
+                - requestedByName
+                - requestedAt
+                - changes
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                      lastTransitionTime:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - message
+                      - lastTransitionTime
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Approved
+                    - Declined
+                    - Applied
+                    - Failed
+                reviewedBy:
+                  type: string
+                reviewedByName:
+                  type: string
+                reviewedAt:
+                  type: string
+                declineReason:
+                  type: string
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      index:
+                        type: integer
+                      status:
+                        type: string
+                        enum:
+                          - Applied
+                          - Failed
+                          - Skipped
+                      error:
+                        type: string
+                    required:
+                      - index
+                      - status

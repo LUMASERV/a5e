@@ -14,6 +14,7 @@ const store = usePlaybookStore();
     :namespaced="true"
     :namespace="namespaceStore.current"
     create-path="/playbooks/new"
+    resource-type="AnsiblePlaybook"
     :edit-path="(item) => `/playbooks/${item.metadata.namespace}/${item.metadata.name}/edit`"
   >
     <template #columns>

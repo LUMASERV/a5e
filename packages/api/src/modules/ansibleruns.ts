@@ -3,11 +3,12 @@ import { API_GROUP_VERSION, RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleRunSpec, AnsibleRunStatus, CustomResource } from '@a5e/schemas';
 import * as k8s from '@kubernetes/client-node';
 import { authorize } from '../auth/authorize';
+import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
 import { resolveGlobalS3Config } from '../lib/s3-status';
 import { sseResponse } from '../lib/sse';
-import { client, impersonatedOptions, kc } from '../plugins/k8s';
+import { client, kc } from '../plugins/k8s';
 
 function s3Client(): Bun.S3Client {
   const config = resolveGlobalS3Config();
@@ -34,31 +35,70 @@ function baseRunName(name: string): string {
 
 export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
   return app
-    .post('/api/v1/namespaces/:namespace/ansibleruns/:name/cancel', async ({ params, headers }) => {
-      const auth = await authorize(extractBearerToken(headers), 'user');
-      if (auth instanceof Response) return auth;
-      const { session } = auth;
-      return client.patch(
-        descriptor,
-        params.name,
-        { spec: { cancel: true } },
-        session.identity,
-        params.namespace,
-      );
-    })
+    .post(
+      '/api/v1/namespaces/:namespace/ansibleruns/:name/cancel',
+      async ({ params, headers, set }) => {
+        const auth = await authorize(extractBearerToken(headers), 'user');
+        if (auth instanceof Response) return auth;
+        const run = await client.get<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
+          descriptor,
+          params.name,
+          'self',
+          params.namespace,
+        );
+        const perms = await resolveEffectivePermissions(auth.session, auth.role);
+        if (
+          !canAct(
+            perms,
+            { type: 'AnsibleRun', namespace: params.namespace, labels: run.metadata.labels },
+            'cancel',
+          )
+        ) {
+          set.status = 403;
+          return {
+            error: 'forbidden',
+            type: 'AnsibleRun',
+            namespace: params.namespace,
+            action: 'cancel',
+          };
+        }
+        return client.patch(
+          descriptor,
+          params.name,
+          { spec: { cancel: true } },
+          'self',
+          params.namespace,
+        );
+      },
+    )
 
     .post(
       '/api/v1/namespaces/:namespace/ansibleruns/:name/retry',
       async ({ params, headers, set }) => {
         const auth = await authorize(extractBearerToken(headers), 'user');
         if (auth instanceof Response) return auth;
-        const { session } = auth;
         const original = await client.get<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
           descriptor,
           params.name,
-          session.identity,
+          'self',
           params.namespace,
         );
+        const perms = await resolveEffectivePermissions(auth.session, auth.role);
+        if (
+          !canAct(
+            perms,
+            { type: 'AnsibleRun', namespace: params.namespace, labels: original.metadata.labels },
+            'retry',
+          )
+        ) {
+          set.status = 403;
+          return {
+            error: 'forbidden',
+            type: 'AnsibleRun',
+            namespace: params.namespace,
+            action: 'retry',
+          };
+        }
 
         // "<base>-retry-2", "<base>-retry-3", ... — retrying an already-retried run increments the
         // same series (via baseRunName) instead of nesting suffixes; the next number is derived
@@ -67,7 +107,7 @@ export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
         const base = baseRunName(params.name);
         const existing = await client.list<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
           descriptor,
-          session.identity,
+          'self',
           params.namespace,
         );
         const retryPattern = new RegExp(`^${escapeRegExp(base)}-retry-(\\d+)$`);
@@ -87,7 +127,7 @@ export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
             metadata: { name, namespace: params.namespace },
             spec: { ...original.spec, cancel: false },
           },
-          session.identity,
+          'self',
           params.namespace,
         );
       },
@@ -95,18 +135,34 @@ export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
 
     .get(
       '/api/v1/namespaces/:namespace/ansibleruns/:name/logs',
-      async ({ params, headers, request }) => {
+      async ({ params, headers, request, set }) => {
         const auth = await authorize(extractBearerToken(headers), 'user');
         if (auth instanceof Response) return auth;
-        const { session } = auth;
+
+        const run = await client.get<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
+          descriptor,
+          params.name,
+          'self',
+          params.namespace,
+        );
+        const perms = await resolveEffectivePermissions(auth.session, auth.role);
+        if (
+          !canAct(
+            perms,
+            { type: 'AnsibleRun', namespace: params.namespace, labels: run.metadata.labels },
+            'get',
+          )
+        ) {
+          set.status = 403;
+          return {
+            error: 'forbidden',
+            type: 'AnsibleRun',
+            namespace: params.namespace,
+            action: 'get',
+          };
+        }
 
         return sseResponse(request.signal, async (send) => {
-          const run = await client.get<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
-            descriptor,
-            params.name,
-            session.identity,
-            params.namespace,
-          );
           const logs = run.status?.logs;
 
           if (logs?.s3) {
@@ -127,7 +183,7 @@ export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
                 params.namespace,
                 logs.podRef.name,
                 logs.podRef.container,
-                session.identity,
+                'self',
                 { follow, tailLines: 500 },
                 request.signal,
               );
@@ -175,13 +231,28 @@ export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
       async ({ params, headers, set, redirect }) => {
         const auth = await authorize(extractBearerToken(headers), 'user');
         if (auth instanceof Response) return auth;
-        const { session } = auth;
         const run = await client.get<CustomResource<AnsibleRunSpec, AnsibleRunStatus>>(
           descriptor,
           params.name,
-          session.identity,
+          'self',
           params.namespace,
         );
+        const perms = await resolveEffectivePermissions(auth.session, auth.role);
+        if (
+          !canAct(
+            perms,
+            { type: 'AnsibleRun', namespace: params.namespace, labels: run.metadata.labels },
+            'get',
+          )
+        ) {
+          set.status = 403;
+          return {
+            error: 'forbidden',
+            type: 'AnsibleRun',
+            namespace: params.namespace,
+            action: 'get',
+          };
+        }
         const logs = run.status?.logs;
 
         if (logs?.s3) {
@@ -191,14 +262,11 @@ export function registerAnsibleRunRoutes(app: AnyElysia): AnyElysia {
 
         if (logs?.podRef) {
           const coreApi = kc.makeApiClient(k8s.CoreV1Api);
-          const text = await coreApi.readNamespacedPodLog(
-            {
-              name: logs.podRef.name,
-              namespace: params.namespace,
-              container: logs.podRef.container,
-            },
-            impersonatedOptions(session.identity),
-          );
+          const text = await coreApi.readNamespacedPodLog({
+            name: logs.podRef.name,
+            namespace: params.namespace,
+            container: logs.podRef.container,
+          });
           set.headers['content-type'] = 'text/plain';
           set.headers['content-disposition'] = `attachment; filename="${params.name}.log"`;
           return text;

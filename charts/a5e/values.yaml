@@ -11,14 +11,21 @@ namespaceOverride: ""
 imagePullSecrets: []
 
 # Registry prefix applied to every component image unless that component sets its own
-# image.repository to a fully-qualified path. Component tags default to .Chart.AppVersion.
+# image.repository to a fully-qualified path. The operator/api/ui/runner images are always built
+# and released together from the same commit (see .github/workflows/release.yml), so `image.tag`
+# is the one value to set for a normal upgrade — it applies to all four. A per-component
+# operator.image.tag/api.image.tag/etc, if set, overrides this for that component only (an escape
+# hatch for pinning a single image, e.g. a hotfix); leaving both unset falls back to
+# .Chart.AppVersion.
 image:
   registry: registry.lumaserv.dev/public/a5e
+  tag: ""
 
 crds:
-  # Installs the 9 AnsibleHost/AnsibleInventory/AnsiblePlaybook/AnsibleSSHKey/AnsibleRun CRDs
-  # (+ Cluster* variants) as regular templates, so `helm upgrade` picks up schema changes —
-  # unlike Helm's special crds/ directory, which is intentionally never upgraded.
+  # Installs the 13 AnsibleHost/AnsibleInventory/AnsiblePlaybook/AnsibleSSHKey/AnsibleRun/
+  # AnsibleJob/ChangeRequest/Group/User CRDs (+ Cluster* variants) as regular templates, so
+  # `helm upgrade` picks up schema changes — unlike Helm's special crds/ directory, which is
+  # intentionally never upgraded.
   install: true
   # Annotates the CRDs `helm.sh/resource-policy: keep` so `helm uninstall` doesn't delete them
   # (and, transitively, every AnsibleHost/AnsibleRun/etc. custom resource in the cluster). Turn

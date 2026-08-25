@@ -11,6 +11,7 @@ const store = useClusterSSHKeyStore();
     :store="store"
     :namespaced="false"
     create-path="/cluster-sshkeys/new"
+    resource-type="ClusterAnsibleSSHKey"
     :edit-path="(item) => `/cluster-sshkeys/${item.metadata.name}`"
   >
     <template #columns>

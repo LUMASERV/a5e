@@ -26,6 +26,14 @@ const routes = [
     // guard below. `bare` only controls whether App.vue skips the DefaultLayout sidebar chrome.
     meta: { bare: true },
   },
+  {
+    path: '/account',
+    name: 'account',
+    component: () => import('../views/AccountView.vue'),
+    // Not `public` (still requires a session) but deliberately exempt from the hasAccess/
+    // no-access redirect below, same reasoning as /whoami on the API side — a role:'none' user
+    // should still be able to see their own identity and set up their own password.
+  },
 
   { path: '/hosts', name: 'hosts', component: () => import('../views/hosts/HostListView.vue') },
   {
@@ -177,6 +185,25 @@ const routes = [
     props: true,
   },
 
+  // Any logged-in user, not admin-gated — proposing a change is ungated for everyone, and who
+  // can actually approve a submitted one is enforced server-side per-item, not by app role.
+  {
+    path: '/change-requests',
+    name: 'change-requests',
+    component: () => import('../views/changerequests/ChangeRequestListView.vue'),
+  },
+  {
+    path: '/change-requests/draft',
+    name: 'change-requests-draft',
+    component: () => import('../views/changerequests/ChangeRequestDraftView.vue'),
+  },
+  {
+    path: '/change-requests/:name',
+    name: 'change-requests-detail',
+    component: () => import('../views/changerequests/ChangeRequestDetailView.vue'),
+    props: true,
+  },
+
   {
     path: '/settings/s3',
     name: 'settings-s3',
@@ -193,6 +220,26 @@ const routes = [
     path: '/settings/users',
     name: 'settings-users',
     component: () => import('../views/UsersSettingsView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/settings/users/:id/edit',
+    name: 'settings-users-edit',
+    component: () => import('../views/UserEditView.vue'),
+    props: true,
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/settings/groups',
+    name: 'settings-groups',
+    component: () => import('../views/GroupsView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
+    path: '/settings/groups/:name/edit',
+    name: 'settings-groups-edit',
+    component: () => import('../views/GroupEditView.vue'),
+    props: true,
     meta: { requiresAdmin: true },
   },
 
@@ -216,7 +263,7 @@ router.beforeEach(async (to) => {
   if (!to.meta.public && !auth.session) {
     return { name: 'login' };
   }
-  if (to.name !== 'no-access' && auth.session && !auth.hasAccess) {
+  if (to.name !== 'no-access' && to.name !== 'account' && auth.session && !auth.hasAccess) {
     return { name: 'no-access' };
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) {

@@ -9,21 +9,61 @@ kind: ClusterRole
 metadata:
   name: a5e-api
 rules:
-  # Plan §4.5: the API's own ServiceAccount holds no direct CRUD on the CRDs — every CRUD call
-  # goes out impersonating the logged-in user (see CustomResourceClient), so real RBAC
-  # RoleBindings on the OIDC group claims are what actually authorize access, not this role.
-  # "users"/"groups" impersonation is a core-API-group resource (apiGroups: [""]) — only what the
-  # app's identity model actually impersonates (see plugins/k8s.ts's impersonatedOptions — it only
-  # ever sets Impersonate-User/Impersonate-Group). Deliberately NOT "serviceaccounts": granting
-  # that would let a leaked API ServiceAccount token impersonate ANY ServiceAccount in the
-  # cluster, including highly-privileged ones, for a capability the app never uses.
+  # The API's own ServiceAccount now holds direct, broad CRUD on every CRD kind — the custom
+  # in-app permission engine (auth/permission-engine.ts), not k8s RBAC/impersonation, decides
+  # every allow/deny (see the plan's "fully replace RBAC" decision). Every CRUD call goes out as
+  # this identity ('self'), never impersonating a logged-in user, so no `impersonate` verb grant
+  # is needed at all any more.
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources:
+      - ansiblehosts
+      - clusteransiblehosts
+      - ansibleinventories
+      - clusteransibleinventories
+      - ansibleplaybooks
+      - clusteransibleplaybooks
+      - ansiblesshkeys
+      - clusteransiblesshkeys
+      - ansibleruns
+      - ansiblejobs
+      - changerequests
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["a5e.k8s.rocks"]
+    resources:
+      - ansiblehosts/status
+      - clusteransiblehosts/status
+      - ansibleinventories/status
+      - clusteransibleinventories/status
+      - ansibleplaybooks/status
+      - clusteransibleplaybooks/status
+      - ansiblesshkeys/status
+      - clusteransiblesshkeys/status
+      - ansibleruns/status
+      - ansiblejobs/status
+      - changerequests/status
+    verbs: ["get", "update", "patch"]
+  # Populates the UI's namespace picker (modules/ancillary.ts) — not gated by the permission
+  # engine, since it's only ever used to list namespaces to pick from, not to decide what
+  # resource operations are allowed within one.
   - apiGroups: [""]
-    resources: ["users", "groups"]
-    verbs: ["impersonate"]
-  # No direct `pods`/`pods/log` grant here: both live log streaming (modules/ansibleruns.ts, via
-  # @a5e/k8s-client's streamPodLog) and log download go out impersonated as the calling user, so
-  # they're authorized against that user's own RBAC bindings — the API's own ServiceAccount has
-  # no business reading arbitrary pod logs itself.
+    resources: ["namespaces"]
+    verbs: ["list"]
+  # Live log streaming/download (modules/ansibleruns.ts, via @a5e/k8s-client's streamPodLog and
+  # the direct coreApi.readNamespacedPodLog call) now runs as this identity too, gated by the
+  # caller's `get` grant on the AnsibleRun itself rather than by RBAC on the Pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # modules/sshkey-import.ts creates the backing Secret for a generated/uploaded SSH key as this
+  # identity too, cluster-wide since a ClusterAnsibleSSHKey's target namespace can be any
+  # namespace — no broad `get` granted, the API only ever writes a Secret it itself names at
+  # import time, never reads an arbitrary one.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -39,35 +79,43 @@ subjects:
     namespace: a5e-system
 ---
 # Namespaced Role (not a ClusterRole) so this stays confined to the API's own namespace: OIDC
-# config, local accounts, and the app-role registry for otherwise-unlinked OIDC users are
-# user-editable at runtime (Settings page — see lib/oidc-config-store.ts, auth/local-accounts.ts,
-# auth/roles.ts) and live in Secrets/a ConfigMap the API reads/writes as itself, never
-# impersonated. `resourceNames` scopes get/update/patch to exactly these objects, but Kubernetes
-# RBAC does NOT apply `resourceNames` to `create` (there's no existing object to name-check yet)
-# — the namespace boundary is what actually limits blast radius for that verb, not the
-# resourceNames list.
+# config and local-account password hashes are the only two things still user-editable at runtime
+# (Settings page) that live in a Secret rather than a CRD — see lib/oidc-config-store.ts,
+# auth/user-passwords.ts. Everything else (identity/role/permissions metadata, groups) moved to
+# the `User`/`Group` CRDs, already covered by the broad a5e.k8s.rocks CRD rules above.
+# `resourceNames` scopes get/update/patch to exactly these Secrets, but Kubernetes RBAC does NOT
+# apply `resourceNames` to `create` (there's no existing object to name-check yet) — the namespace
+# boundary is what actually limits blast radius for that verb, not the resourceNames list.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: a5e-api-oidc-config
   namespace: a5e-system
 rules:
+  # a5e-user-passwords: the only place a password hash ever lives (auth/user-passwords.ts) — the
+  # identity/authorization metadata it belongs to (username, role, permissions, ...) is a real
+  # `User` CRD now, not a Secret, already covered by the broad a5e.k8s.rocks CRD rules above; only
+  # the credential material itself stays here, narrowly scoped by name.
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: ["a5e-oidc-config", "a5e-local-accounts"]
+    resourceNames: ["a5e-oidc-config", "a5e-user-passwords"]
     verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
-  # a5e-oidc-user-roles: not sensitive (no passwords/secrets), just an identity->role map
-  # for OIDC subs never linked to a local account — a ConfigMap, not a Secret.
+  # a5e-local-accounts / a5e-oidc-user-roles: the pre-User-CRD accounts store (auth/
+  # migrate-legacy-users.ts), from any install that predates this change. get+delete only — an
+  # upgraded API reads it once at startup to migrate every account into a `User` CR, then deletes
+  # it; nothing ever writes to it again. A from-scratch install never creates these, so a fresh
+  # deployment just gets a permission it never exercises.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["a5e-local-accounts"]
+    verbs: ["get", "delete"]
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["a5e-oidc-user-roles"]
-    verbs: ["get", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["create"]
+    verbs: ["get", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

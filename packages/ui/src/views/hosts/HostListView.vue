@@ -36,6 +36,7 @@ async function toggleEnabled(
     :namespaced="true"
     :namespace="namespaceStore.current"
     create-path="/hosts/new"
+    resource-type="AnsibleHost"
     :edit-path="(item) => `/hosts/${item.metadata.namespace}/${item.metadata.name}/edit`"
     :extra-filter="matchesEnabledFilter"
   >

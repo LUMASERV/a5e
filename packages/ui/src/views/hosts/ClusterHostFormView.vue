@@ -8,6 +8,7 @@ import JumpHostEditor from '../../components/JumpHostEditor.vue';
 import LabelsEditor from '../../components/LabelsEditor.vue';
 import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 import VarsEditor from '../../components/VarsEditor.vue';
+import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useClusterHostStore } from '../../stores/resources';
 
@@ -15,6 +16,7 @@ const props = defineProps<{ name?: string }>();
 const router = useRouter();
 const store = useClusterHostStore();
 const namespaceStore = useNamespaceStore();
+const draftStore = useChangeRequestDraftStore();
 
 const isEdit = Boolean(props.name);
 const form = reactive<{
@@ -43,11 +45,12 @@ async function save() {
   try {
     if (isEdit) {
       const existing = await store.get(form.name);
-      await store.update(form.name, {
-        ...existing,
-        metadata: { ...existing.metadata, labels: form.labels },
-        spec,
-      });
+      await store.update(
+        form.name,
+        { ...existing, metadata: { ...existing.metadata, labels: form.labels }, spec },
+        undefined,
+        existing,
+      );
     } else {
       await store.create({
         apiVersion: API_GROUP_VERSION,
@@ -56,7 +59,7 @@ async function save() {
         spec,
       });
     }
-    ElMessage.success('Saved');
+    ElMessage.success(draftStore.isActive ? 'Added to change request draft' : 'Saved');
     router.push('/cluster-hosts');
   } catch (err) {
     ElMessage.error((err as Error).message);

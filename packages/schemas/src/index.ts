@@ -7,4 +7,8 @@ export * from './playbooks';
 export * from './inventories';
 export * from './runs';
 export * from './jobs';
+export * from './change-requests';
+export * from './groups';
+export * from './permissions';
+export * from './users';
 export * from './crd-meta';

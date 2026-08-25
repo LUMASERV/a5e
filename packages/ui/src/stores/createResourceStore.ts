@@ -12,9 +12,37 @@ function keyOf(obj: CustomResource<unknown, unknown>): string {
 }
 
 /**
- * One store per kind via this factory (plan §5.2) — avoids 9x hand-duplicated CRUD/watch
- * boilerplate. `list()` opens/reuses the SSE watch relay and reconciles ADDED/MODIFIED/DELETED
- * into a reactive map keyed by `namespace/name` (or `name` for cluster-scoped).
+ * Describes a create/update/delete a caller is about to perform, before it's actually sent to the
+ * API — the hook a change-request draft (stores/changeRequestDraft.ts) intercepts to capture the
+ * mutation instead of applying it. Kept generic here (no import of anything change-request-
+ * specific) so this factory stays usable on its own; `registerMutationInterceptor` is the only
+ * coupling point, and it's a no-op (`null`) until something registers one.
+ */
+export interface MutationIntent {
+  kind: 'create' | 'update' | 'delete';
+  type: string;
+  namespace?: string;
+  name?: string;
+  body?: unknown;
+  /** The object as fetched before this mutation — only ever set for update/delete, and only used
+   * for building a real before/after diff in the draft review UI, never sent to the server. */
+  previous?: unknown;
+}
+export type MutationInterceptorResult = { staged: true; result: unknown } | { staged: false };
+type MutationInterceptor = (intent: MutationIntent) => MutationInterceptorResult;
+
+let mutationInterceptor: MutationInterceptor | null = null;
+
+/** Registers the one global interceptor every resource store's create/update/patch/remove checks
+ * first — called once from main.ts. Pass `null` to clear it. */
+export function registerMutationInterceptor(fn: MutationInterceptor | null): void {
+  mutationInterceptor = fn;
+}
+
+/**
+ * One store per kind via this factory — avoids 9x hand-duplicated CRUD/watch boilerplate.
+ * `list()` opens/reuses the SSE watch relay and reconciles ADDED/MODIFIED/DELETED into a
+ * reactive map keyed by `namespace/name` (or `name` for cluster-scoped).
  */
 export function createResourceStore<TSpec, TStatus>(id: string, descriptor: ResourceDescriptor) {
   return defineStore(id, () => {
@@ -58,24 +86,61 @@ export function createResourceStore<TSpec, TStatus>(id: string, descriptor: Reso
       );
     }
     function create(body: unknown, namespace?: string) {
+      // `name` isn't a separate create() argument (it's embedded in body.metadata.name) — surface
+      // it on the intent anyway so drafting/review UI can display it without reaching into body.
+      const name = (body as { metadata?: { name?: string } } | undefined)?.metadata?.name;
+      const staged = mutationInterceptor?.({
+        kind: 'create',
+        type: descriptor.kind,
+        namespace,
+        name,
+        body,
+      });
+      if (staged?.staged) return Promise.resolve(staged.result as CustomResource<TSpec, TStatus>);
       return apiClient.create<CustomResource<TSpec, TStatus>>(
         resourceBasePath(descriptor, namespace),
         body,
       );
     }
-    function update(name: string, body: unknown, namespace?: string) {
+    function update(name: string, body: unknown, namespace?: string, previous?: unknown) {
+      const staged = mutationInterceptor?.({
+        kind: 'update',
+        type: descriptor.kind,
+        namespace,
+        name,
+        body,
+        previous,
+      });
+      if (staged?.staged) return Promise.resolve(staged.result as CustomResource<TSpec, TStatus>);
       return apiClient.replace<CustomResource<TSpec, TStatus>>(
         `${resourceBasePath(descriptor, namespace)}/${name}`,
         body,
       );
     }
-    function patch(name: string, body: unknown, namespace?: string) {
+    function patch(name: string, body: unknown, namespace?: string, previous?: unknown) {
+      const staged = mutationInterceptor?.({
+        kind: 'update',
+        type: descriptor.kind,
+        namespace,
+        name,
+        body,
+        previous,
+      });
+      if (staged?.staged) return Promise.resolve(staged.result as CustomResource<TSpec, TStatus>);
       return apiClient.patch<CustomResource<TSpec, TStatus>>(
         `${resourceBasePath(descriptor, namespace)}/${name}`,
         body,
       );
     }
-    function remove(name: string, namespace?: string) {
+    function remove(name: string, namespace?: string, previous?: unknown) {
+      const staged = mutationInterceptor?.({
+        kind: 'delete',
+        type: descriptor.kind,
+        namespace,
+        name,
+        previous,
+      });
+      if (staged?.staged) return Promise.resolve();
       return apiClient.remove(`${resourceBasePath(descriptor, namespace)}/${name}`);
     }
     function stop() {

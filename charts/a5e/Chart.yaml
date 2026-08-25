@@ -2,8 +2,8 @@ apiVersion: v2
 name: a5e
 description: Kubernetes-native Ansible Semaphore alternative — operator, API, and UI
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 home: https://github.com/LUMASERV/a5e
 sources:
   - https://github.com/LUMASERV/a5e

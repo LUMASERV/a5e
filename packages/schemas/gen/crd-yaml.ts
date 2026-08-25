@@ -68,7 +68,12 @@ function applyCel(root: JSONSchemaNode, extra: CelExtra) {
   ];
 }
 
-/** Recursively replace fully-open records (additionalProperties: {}) with preserve-unknown-fields. */
+/**
+ * Recursively replace fully-open records (additionalProperties: {}) with preserve-unknown-fields,
+ * and a completely untyped node (zod-to-json-schema emits `{}` for `z.unknown()`/`z.any()` — no
+ * `type` at all) the same way: Kubernetes' structural schema validation rejects any property with
+ * no `type`, unless it carries `x-kubernetes-preserve-unknown-fields: true` instead.
+ */
 function preserveUnknownFields(node: JSONSchemaNode) {
   if (!node || typeof node !== 'object') return;
   if (
@@ -80,6 +85,9 @@ function preserveUnknownFields(node: JSONSchemaNode) {
   ) {
     // biome-ignore lint/performance/noDelete: one-off codegen script, not a hot path.
     delete node.additionalProperties;
+    node['x-kubernetes-preserve-unknown-fields'] = true;
+  }
+  if (Object.keys(node).length === 0) {
     node['x-kubernetes-preserve-unknown-fields'] = true;
   }
   for (const key of ['properties']) {

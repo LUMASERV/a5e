@@ -11,4 +11,7 @@ resources:
   - clusteransiblesshkeys.yaml
   - ansibleruns.yaml
   - ansiblejobs.yaml
+  - changerequests.yaml
+  - groups.yaml
+  - users.yaml
   - rbac/

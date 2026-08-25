@@ -70,15 +70,19 @@ app.kubernetes.io/managed-by: {{ $root.Release.Service }}
 {{- end -}}
 
 {{/*
-Renders "repository:tag" for a component's image block, defaulting tag to .Chart.AppVersion and
-prefixing repository with the shared registry unless it's already fully-qualified (contains a
-"/" before the first "."-free registry-host segment is ambiguous in general, so we simply treat
-any repository containing a "/" as already-qualified — matches how every other chart handles this).
+Renders "repository:tag" for a component's image block. Tag resolution, most to least specific:
+a per-component tag (operator.image.tag/etc — an escape hatch for pinning one component
+separately, e.g. a hotfix), then the shared image.tag (the common case: all 4 images are always
+released together from the same commit, so one value covers every component), then
+.Chart.AppVersion as a last-resort default. Repository is prefixed with the shared registry
+unless it's already fully-qualified (contains a "/" — a "."-free registry-host segment is
+ambiguous in general, so we simply treat any repository containing a "/" as already-qualified,
+matching how every other chart handles this).
 */}}
 {{- define "a5e.image" -}}
 {{- $root := index . 0 -}}
 {{- $img := index . 1 -}}
-{{- $tag := $img.tag | default $root.Chart.AppVersion -}}
+{{- $tag := $img.tag | default $root.Values.image.tag | default $root.Chart.AppVersion -}}
 {{- if or (not $root.Values.image.registry) (contains "/" $img.repository) -}}
 {{- printf "%s:%s" $img.repository $tag -}}
 {{- else -}}

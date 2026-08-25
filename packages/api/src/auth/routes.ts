@@ -1,5 +1,4 @@
 import type { AnyElysia } from '../lib/elysia-types';
-import { findAccountBySub, linkAccountToSub, verifyLocalLogin } from './local-accounts';
 import {
   buildAuthorizationUrl,
   endSessionUrl,
@@ -9,8 +8,7 @@ import {
   resolveOidcConfig,
   verifyIdToken,
 } from './oidc';
-import { trackOidcLogin } from './roles';
-import { extractBearerToken } from './session';
+import { extractBearerToken, resolveSession } from './session';
 import type { Session } from './session';
 import {
   consumePendingLogin,
@@ -19,6 +17,13 @@ import {
   storePendingLogin,
   storeSession,
 } from './session-store';
+import {
+  changeOwnPassword,
+  findAccountBySub,
+  linkAccountToSub,
+  trackOidcLogin,
+  verifyLocalLogin,
+} from './user-store';
 
 /** local-account identities are prefixed to keep them visually/structurally distinct from OIDC
  * `sub` values in RBAC bindings and audit logs — never collides with a real issuer's sub format. */
@@ -68,154 +73,189 @@ const isProd = process.env.NODE_ENV === 'production';
  * time, and handing back an opaque token the UI stores and replays as `Authorization: Bearer`.
  */
 export function registerAuthRoutes(app: AnyElysia): AnyElysia {
-  return app
-    .get('/api/v1/auth/oidc-status', async () => ({
-      configured: Boolean(await resolveOidcConfig()),
-    }))
+  return (
+    app
+      .get('/api/v1/auth/oidc-status', async () => ({
+        configured: Boolean(await resolveOidcConfig()),
+      }))
 
-    .get('/api/v1/auth/login', async ({ cookie, redirect }) => {
-      const config = await resolveOidcConfig();
-      if (!config) {
-        return redirectToLoginWithError(
-          redirect,
-          'OIDC is not configured — set it up in Settings, or ask an admin to.',
-        );
-      }
+      .get('/api/v1/auth/login', async ({ cookie, redirect }) => {
+        const config = await resolveOidcConfig();
+        if (!config) {
+          return redirectToLoginWithError(
+            redirect,
+            'OIDC is not configured — set it up in Settings, or ask an admin to.',
+          );
+        }
 
-      const state = generateState();
-      const { verifier, challenge } = generatePkce();
-      storePendingLogin(state, verifier);
+        const state = generateState();
+        const { verifier, challenge } = generatePkce();
+        storePendingLogin(state, verifier);
 
-      cookie[OIDC_STATE_COOKIE]?.set({
-        value: state,
-        httpOnly: true,
-        secure: isProd,
-        sameSite: 'lax',
-        path: '/api/v1/auth',
-        maxAge: 5 * 60,
-      });
+        cookie[OIDC_STATE_COOKIE]?.set({
+          value: state,
+          httpOnly: true,
+          secure: isProd,
+          sameSite: 'lax',
+          path: '/api/v1/auth',
+          maxAge: 5 * 60,
+        });
 
-      const url = await buildAuthorizationUrl(config, state, challenge);
-      return redirect(url, 302);
-    })
+        const url = await buildAuthorizationUrl(config, state, challenge);
+        return redirect(url, 302);
+      })
 
-    .get('/api/v1/auth/callback', async ({ query, cookie, redirect }) => {
-      const config = await resolveOidcConfig();
-      if (!config) {
-        return redirectToLoginWithError(redirect, 'OIDC is not configured');
-      }
+      .get('/api/v1/auth/callback', async ({ query, cookie, redirect }) => {
+        const config = await resolveOidcConfig();
+        if (!config) {
+          return redirectToLoginWithError(redirect, 'OIDC is not configured');
+        }
 
-      const code = query.code;
-      const state = query.state;
-      if (!code || !state) {
-        return redirectToLoginWithError(
-          redirect,
-          'Login failed: missing code/state from the identity provider.',
-        );
-      }
+        const code = query.code;
+        const state = query.state;
+        if (!code || !state) {
+          return redirectToLoginWithError(
+            redirect,
+            'Login failed: missing code/state from the identity provider.',
+          );
+        }
 
-      // Requires the state to match a cookie set on THIS browser at /login time — a state that's
-      // merely unguessable but not bound to the initiating user-agent is still vulnerable to an
-      // attacker starting their own login, capturing the callback URL, and handing it to a victim
-      // (see OIDC_STATE_COOKIE's definition above).
-      const stateCookie = cookie[OIDC_STATE_COOKIE]?.value;
-      cookie[OIDC_STATE_COOKIE]?.remove();
-      if (!stateCookie || stateCookie !== state) {
-        return redirectToLoginWithError(
-          redirect,
-          'Login state does not match this browser — please try signing in again.',
-        );
-      }
+        // Requires the state to match a cookie set on THIS browser at /login time — a state that's
+        // merely unguessable but not bound to the initiating user-agent is still vulnerable to an
+        // attacker starting their own login, capturing the callback URL, and handing it to a victim
+        // (see OIDC_STATE_COOKIE's definition above).
+        const stateCookie = cookie[OIDC_STATE_COOKIE]?.value;
+        cookie[OIDC_STATE_COOKIE]?.remove();
+        if (!stateCookie || stateCookie !== state) {
+          return redirectToLoginWithError(
+            redirect,
+            'Login state does not match this browser — please try signing in again.',
+          );
+        }
 
-      const codeVerifier = consumePendingLogin(state);
-      if (!codeVerifier) {
-        return redirectToLoginWithError(
-          redirect,
-          'Login link expired — please try signing in again.',
-        );
-      }
+        const codeVerifier = consumePendingLogin(state);
+        if (!codeVerifier) {
+          return redirectToLoginWithError(
+            redirect,
+            'Login link expired — please try signing in again.',
+          );
+        }
 
-      try {
-        const tokens = await exchangeCodeForTokens(config, code, codeVerifier);
-        const verified = await verifyIdToken(config, tokens.id_token);
+        try {
+          const tokens = await exchangeCodeForTokens(config, code, codeVerifier);
+          const verified = await verifyIdToken(config, tokens.id_token);
 
-        // A local account already linked to this sub (from a prior login) always wins — it's
-        // the whole point of linking: one RBAC identity regardless of which login method was
-        // used this time. Otherwise, try a fresh link by matching email (no-op if no local
-        // account has that email, or if "email" wasn't requested as a scope at all).
-        const linked =
-          (await findAccountBySub(verified.sub)) ??
-          (await linkAccountToSub(verified.email, verified.emailVerified, verified.sub));
+          // A local account already linked to this sub (from a prior login) always wins — it's
+          // the whole point of linking: one RBAC identity regardless of which login method was
+          // used this time. Otherwise, try a fresh link by matching email (no-op if no local
+          // account has that email, or if "email" wasn't requested as a scope at all).
+          const linked =
+            (await findAccountBySub(verified.sub)) ??
+            (await linkAccountToSub(verified.email, verified.emailVerified, verified.sub));
 
-        let session: Session;
-        if (linked) {
-          session = {
-            identity: localIdentity(linked.username, linked.impersonateGroups),
-            displayName: linked.displayName ?? linked.email ?? linked.username,
-            kind: 'local',
-          };
-        } else {
-          const displayName = verified.email ?? verified.sub;
-          // Not linked to any local account — track this sub in the standalone OIDC-user role
-          // registry (see auth/roles.ts) so it shows up for an admin to promote from the default
-          // `role: none`. Keeps email/displayName fresh on every login without ever touching an
-          // already-assigned role.
-          await trackOidcLogin(verified.sub, verified.email, displayName);
-          session = {
-            identity: { impersonateUser: verified.sub, impersonateGroups: verified.groups },
-            displayName,
-            kind: 'oidc',
-          };
+          let session: Session;
+          if (linked) {
+            session = {
+              identity: localIdentity(linked.username, linked.impersonateGroups),
+              displayName: linked.displayName ?? linked.email ?? linked.username,
+              kind: 'local',
+            };
+          } else {
+            const displayName = verified.email ?? verified.sub;
+            // Not linked to any local account — track this sub in the standalone OIDC-user role
+            // registry (see auth/roles.ts) so it shows up for an admin to promote from the default
+            // `role: none`. Keeps email/displayName fresh on every login without ever touching an
+            // already-assigned role.
+            await trackOidcLogin(verified.sub, verified.email, displayName);
+            session = {
+              identity: { impersonateUser: verified.sub, impersonateGroups: verified.groups },
+              displayName,
+              kind: 'oidc',
+            };
+          }
+
+          const sessionId = createSessionId();
+          storeSession(sessionId, session);
+
+          // The token travels in the URL *fragment*, never a query string: fragments are stripped
+          // by the browser before the request line is even built, so they never reach this (or any)
+          // server's access logs, Referer headers, or a proxy in between — only client-side JS on
+          // the receiving page can read `location.hash`. The UI's /auth/callback route (a public,
+          // unauthenticated route) is exactly that JS: it reads the token, stores it, then
+          // immediately replaces the URL so the token doesn't linger in browser history either.
+          const callbackUrl = new URL('/auth/callback', uiOrigin());
+          callbackUrl.hash = `token=${encodeURIComponent(sessionId)}`;
+          return redirect(callbackUrl.toString(), 302);
+        } catch (err) {
+          return redirectToLoginWithError(redirect, `Login failed: ${(err as Error).message}`);
+        }
+      })
+
+      .post('/api/v1/auth/local-login', async ({ body, set }) => {
+        const { username, password } = body as { username?: string; password?: string };
+        if (!username || !password) {
+          set.status = 400;
+          return { error: 'username and password are required' };
+        }
+
+        const account = await verifyLocalLogin(username, password);
+        if (!account) {
+          set.status = 401;
+          return { error: 'invalid username or password' };
         }
 
         const sessionId = createSessionId();
-        storeSession(sessionId, session);
+        storeSession(sessionId, {
+          identity: localIdentity(account.username, account.impersonateGroups),
+          displayName: account.displayName ?? account.username,
+          kind: 'local',
+        });
 
-        // The token travels in the URL *fragment*, never a query string: fragments are stripped
-        // by the browser before the request line is even built, so they never reach this (or any)
-        // server's access logs, Referer headers, or a proxy in between — only client-side JS on
-        // the receiving page can read `location.hash`. The UI's /auth/callback route (a public,
-        // unauthenticated route) is exactly that JS: it reads the token, stores it, then
-        // immediately replaces the URL so the token doesn't linger in browser history either.
-        const callbackUrl = new URL('/auth/callback', uiOrigin());
-        callbackUrl.hash = `token=${encodeURIComponent(sessionId)}`;
-        return redirect(callbackUrl.toString(), 302);
-      } catch (err) {
-        return redirectToLoginWithError(redirect, `Login failed: ${(err as Error).message}`);
-      }
-    })
+        return { token: sessionId };
+      })
 
-    .post('/api/v1/auth/local-login', async ({ body, set }) => {
-      const { username, password } = body as { username?: string; password?: string };
-      if (!username || !password) {
-        set.status = 400;
-        return { error: 'username and password are required' };
-      }
+      // Self-service password change/set for the CURRENT session, gated only on being logged in
+      // (not the 'user'/'admin' app role — a role:'none' account should still be able to set up its
+      // own credentials) and on that session actually being a local account (kind: 'local'; see
+      // changeOwnPassword's doc comment for the current-password-required-unless-none-set rule).
+      .post('/api/v1/auth/me/password', async ({ headers, body, set }) => {
+        const session = resolveSession(extractBearerToken(headers));
+        if (!session) {
+          set.status = 401;
+          return { error: 'unauthorized' };
+        }
+        if (session.kind !== 'local') {
+          set.status = 400;
+          return { error: 'this identity has no local password to change — it signs in via SSO' };
+        }
 
-      const account = await verifyLocalLogin(username, password);
-      if (!account) {
-        set.status = 401;
-        return { error: 'invalid username or password' };
-      }
+        const { currentPassword, newPassword } = body as {
+          currentPassword?: string;
+          newPassword?: string;
+        };
+        if (!newPassword || newPassword.length < 8) {
+          set.status = 400;
+          return { error: 'newPassword must be at least 8 characters' };
+        }
 
-      const sessionId = createSessionId();
-      storeSession(sessionId, {
-        identity: localIdentity(account.username, account.impersonateGroups),
-        displayName: account.displayName ?? account.username,
-        kind: 'local',
-      });
+        const username = session.identity.impersonateUser.slice('local:'.length);
+        const result = await changeOwnPassword(username, currentPassword, newPassword);
+        if (!result.ok) {
+          set.status = 400;
+          return { error: result.error };
+        }
+        return { ok: true };
+      })
 
-      return { token: sessionId };
-    })
+      .post('/api/v1/auth/logout', async ({ headers }) => {
+        deleteSession(extractBearerToken(headers));
 
-    .post('/api/v1/auth/logout', async ({ headers }) => {
-      deleteSession(extractBearerToken(headers));
-
-      const config = await resolveOidcConfig();
-      if (config) {
-        const endSession = await endSessionUrl(config).catch(() => undefined);
-        if (endSession) return { endSessionUrl: endSession };
-      }
-      return { ok: true };
-    });
+        const config = await resolveOidcConfig();
+        if (config) {
+          const endSession = await endSessionUrl(config).catch(() => undefined);
+          if (endSession) return { endSessionUrl: endSession };
+        }
+        return { ok: true };
+      })
+  );
 }

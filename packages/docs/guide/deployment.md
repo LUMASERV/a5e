@@ -9,6 +9,7 @@ A5E ships as a single Helm chart (`charts/a5e`) that installs the operator, the 
 helm install a5e charts/a5e \
   --namespace a5e-system --create-namespace \
   --set image.registry=registry.lumaserv.dev/public/a5e \
+  --set image.tag=0.2.0 \
   --set api.uiOrigin=https://a5e.example.com \
   --set api.bootstrapAdmin.username=admin \
   --set api.bootstrapAdmin.password=change-me \
@@ -17,9 +18,9 @@ helm install a5e charts/a5e \
   --set ui.ingress.hosts[0].host=a5e.example.com
 ```
 
-`api.bootstrapAdmin` creates exactly one local admin account the very first time the
-local-accounts store is empty (see [Authentication](/guide/authentication#bootstrap)) — safe to
-leave set; rotate/remove the password via Settings → Users afterward.
+`api.bootstrapAdmin` creates exactly one local admin account the very first time no local account
+exists yet (see [Authentication](/guide/authentication#bootstrap)) — safe to leave set;
+rotate/remove the password via Settings → Users afterward.
 
 OIDC is configured from the Settings page after install, not chart values — the redirect URI to
 register at your IdP is shown there too. `api.oidc.create=true` (+ issuer/clientId/clientSecret)

@@ -18,7 +18,7 @@ function jsonResponse(status: number, body: unknown): Response {
 export async function authorize(
   token: unknown,
   min: Exclude<AppRole, 'none'>,
-): Promise<{ session: Session } | Response> {
+): Promise<{ session: Session; role: AppRole } | Response> {
   const session = resolveSession(token);
   if (!session) return jsonResponse(401, { error: 'unauthorized' });
 
@@ -31,5 +31,5 @@ export async function authorize(
           : `requires the "${min}" role`,
     });
   }
-  return { session };
+  return { session, role };
 }

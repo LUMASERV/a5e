@@ -3,11 +3,13 @@ import type { AnsibleSSHKeyStatus, ClusterAnsibleSSHKeySpec, CustomResource } fr
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useClusterSSHKeyStore } from '../../stores/resources';
 
 const props = defineProps<{ name: string }>();
 const router = useRouter();
 const store = useClusterSSHKeyStore();
+const draftStore = useChangeRequestDraftStore();
 const item = ref<CustomResource<ClusterAnsibleSSHKeySpec, AnsibleSSHKeyStatus> | null>(null);
 
 onMounted(async () => {
@@ -20,8 +22,8 @@ async function remove() {
   } catch {
     return;
   }
-  await store.remove(props.name);
-  ElMessage.success('Deleted');
+  await store.remove(props.name, undefined, item.value);
+  ElMessage.success(draftStore.isActive ? 'Added to change request draft' : 'Deleted');
   router.push('/cluster-sshkeys');
 }
 </script>

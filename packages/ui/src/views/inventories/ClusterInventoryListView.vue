@@ -21,6 +21,7 @@ async function download(name: string) {
     :store="store"
     :namespaced="false"
     create-path="/cluster-inventories/new"
+    resource-type="ClusterAnsibleInventory"
     :edit-path="(item) => `/cluster-inventories/${item.metadata.name}/edit`"
   >
     <template #columns>

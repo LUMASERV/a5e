@@ -33,6 +33,7 @@ async function toggleEnabled(
     :store="store"
     :namespaced="false"
     create-path="/cluster-hosts/new"
+    resource-type="ClusterAnsibleHost"
     :edit-path="(item) => `/cluster-hosts/${item.metadata.name}/edit`"
     :extra-filter="matchesEnabledFilter"
   >

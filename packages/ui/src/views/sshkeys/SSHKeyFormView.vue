@@ -4,15 +4,19 @@ import { ElMessage } from 'element-plus';
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { apiClient } from '../../api/client';
+import LabelsEditor from '../../components/LabelsEditor.vue';
+import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useSSHKeyStore } from '../../stores/resources';
 
 const router = useRouter();
 const namespaceStore = useNamespaceStore();
 const store = useSSHKeyStore();
+const draftStore = useChangeRequestDraftStore();
 
 type Mode = 'existing' | 'upload' | 'generate';
-const mode = ref<Mode>('generate');
+const mode = ref<Mode>(draftStore.isActive ? 'existing' : 'generate');
+const labels = ref<Record<string, string> | undefined>(undefined);
 const form = reactive({
   name: '',
   secretName: '',
@@ -44,7 +48,7 @@ async function save() {
         {
           apiVersion: API_GROUP_VERSION,
           kind: 'AnsibleSSHKey',
-          metadata: { name: form.name, namespace },
+          metadata: { name: form.name, namespace, labels: labels.value },
           spec: {
             secretRef: { name: form.secretName, key: form.secretKey || undefined },
             passphraseSecretRef: form.passphraseSecretName
@@ -61,9 +65,10 @@ async function save() {
         keyType: form.keyType,
         privateKey: mode.value === 'upload' ? form.privateKey : undefined,
         passphrase: form.passphrase || undefined,
+        labels: labels.value,
       });
     }
-    ElMessage.success('Saved');
+    ElMessage.success(draftStore.isActive ? 'Added to change request draft' : 'Saved');
     router.push('/sshkeys');
   } catch (err) {
     ElMessage.error((err as Error).message);
@@ -74,14 +79,24 @@ async function save() {
 <template>
   <div>
     <h2>New SSH Key</h2>
+    <el-alert
+      v-if="draftStore.isActive"
+      type="info"
+      :closable="false"
+      title="Generate and Upload aren't stageable in a change request — use Existing secret, or finish/cancel your draft first."
+      style="margin-bottom: 16px"
+    />
     <el-form label-width="160px">
       <el-form-item label="Name">
         <el-input v-model="form.name" />
       </el-form-item>
+      <el-form-item label="Labels">
+        <LabelsEditor v-model="labels" />
+      </el-form-item>
       <el-form-item label="Source">
         <el-radio-group v-model="mode">
-          <el-radio-button value="generate">Generate</el-radio-button>
-          <el-radio-button value="upload">Upload file</el-radio-button>
+          <el-radio-button value="generate" :disabled="draftStore.isActive">Generate</el-radio-button>
+          <el-radio-button value="upload" :disabled="draftStore.isActive">Upload file</el-radio-button>
           <el-radio-button value="existing">Existing secret</el-radio-button>
         </el-radio-group>
       </el-form-item>

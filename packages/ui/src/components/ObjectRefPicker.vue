@@ -3,6 +3,7 @@ import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import { computed, onMounted, ref, watch } from 'vue';
 import { apiClient } from '../api/client';
 import { resourceBasePath } from '../api/resource-path';
+import { useChangeRequestDraftStore } from '../stores/changeRequestDraft';
 
 const props = withDefaults(
   defineProps<{
@@ -23,8 +24,21 @@ const emit = defineEmits<{
 const isCluster = computed(() => props.modelValue.kind === props.clusterKind);
 const namespaceRequired = computed(() => props.parentScope === 'cluster' && !isCluster.value);
 const effectiveNamespace = computed(() => props.modelValue.namespace || props.namespace);
-const options = ref<string[]>([]);
+const liveOptions = ref<string[]>([]);
 const loading = ref(false);
+const draftStore = useChangeRequestDraftStore();
+
+// While a change-request draft is active, a staged-but-not-yet-created object of the referenced
+// kind won't show up in the live list above — merge in its name so it's at least selectable
+// (resolves once the request is approved and applied in order, since `changes` array order is
+// apply order). Accepted v1 limitation: no validation beyond "the name exists in the draft."
+const pendingCreateNames = computed(() => {
+  const kind = isCluster.value ? props.clusterKind : props.namespacedKind;
+  return draftStore.items
+    .filter((i) => i.kind === 'create' && i.type === kind && i.name)
+    .map((i) => i.name as string);
+});
+const options = computed(() => [...new Set([...liveOptions.value, ...pendingCreateNames.value])]);
 
 async function loadOptions() {
   loading.value = true;
@@ -32,7 +46,7 @@ async function loadOptions() {
     const kind = isCluster.value ? props.clusterKind : props.namespacedKind;
     const descriptor = RESOURCE_DESCRIPTORS_BY_KIND[kind]!;
     if (namespaceRequired.value && !props.modelValue.namespace) {
-      options.value = [];
+      liveOptions.value = [];
       return;
     }
     const path = resourceBasePath(
@@ -40,7 +54,7 @@ async function loadOptions() {
       descriptor.scope === 'Namespaced' ? effectiveNamespace.value : undefined,
     );
     const result = await apiClient.list<{ metadata: { name: string } }>(path);
-    options.value = result.items.map((i) => i.metadata.name);
+    liveOptions.value = result.items.map((i) => i.metadata.name);
   } finally {
     loading.value = false;
   }

@@ -3,7 +3,7 @@ import { resolveRole } from '../auth/roles';
 import { extractBearerToken, resolveSession } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
 import { resolveGlobalS3Config } from '../lib/s3-status';
-import { coreApi, impersonatedOptions } from '../plugins/k8s';
+import { coreApi } from '../plugins/k8s';
 
 function unauthorized() {
   return new Response(JSON.stringify({ error: 'unauthorized' }), {
@@ -31,10 +31,10 @@ export function registerAncillaryRoutes(app: AnyElysia): AnyElysia {
       .get('/api/v1/namespaces', async ({ headers }) => {
         const auth = await authorize(extractBearerToken(headers), 'user');
         if (auth instanceof Response) return auth;
-        const result = await coreApi.listNamespace(
-          undefined,
-          impersonatedOptions(auth.session.identity),
-        );
+        // Listed as the API's own identity (see plan's RBAC-replacement decision) — not gated by
+        // the permission engine, since this is only ever used to populate the UI's namespace
+        // picker, not to decide what resource operations are allowed within a namespace.
+        const result = await coreApi.listNamespace();
         return { items: result.items.map((ns) => ({ name: ns.metadata?.name })) };
       })
 

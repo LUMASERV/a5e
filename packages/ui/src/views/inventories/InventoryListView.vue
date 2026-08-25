@@ -27,6 +27,7 @@ async function download(namespace: string, name: string) {
     :namespaced="true"
     :namespace="namespaceStore.current"
     create-path="/inventories/new"
+    resource-type="AnsibleInventory"
     :edit-path="(item) => `/inventories/${item.metadata.namespace}/${item.metadata.name}/edit`"
   >
     <template #columns>

@@ -3,6 +3,7 @@ import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleInventorySpec, AnsibleInventoryStatus, CustomResource } from '@a5e/schemas';
 import YAML from 'yaml';
 import { authorize } from '../auth/authorize';
+import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
 import { client } from '../plugins/k8s';
@@ -64,16 +65,28 @@ async function handleDownload(
 ) {
   const auth = await authorize(token, 'user');
   if (auth instanceof Response) return auth;
-  const { session } = auth;
 
   const descriptor = RESOURCE_DESCRIPTORS_BY_KIND[kind]!;
   const obj = await client.get<CustomResource<AnsibleInventorySpec, AnsibleInventoryStatus>>(
     descriptor,
     name,
-    session.identity,
+    'self',
     namespace,
   );
-  const groups = await resolveInventoryGroups(client, session.identity, obj.spec, namespace, true);
+  const perms = await resolveEffectivePermissions(auth.session, auth.role);
+  if (!canAct(perms, { type: kind, namespace, labels: obj.metadata.labels }, 'download')) {
+    return new Response(
+      JSON.stringify({ error: 'forbidden', type: kind, namespace, action: 'download' }),
+      {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
+  }
+  // Internal reference traversal (Hosts via jump chains) is not individually re-checked per
+  // referenced object — same trust model the operator already uses once you can see/download an
+  // Inventory (see permission-engine.ts plan notes); only ChangeRequest items get per-item checks.
+  const groups = await resolveInventoryGroups(client, 'self', obj.spec, namespace, true);
   const yaml = renderInventoryYaml(obj.spec.vars, groups);
 
   return new Response(yaml, {

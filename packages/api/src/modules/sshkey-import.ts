@@ -2,9 +2,10 @@ import { generateKeyPairSync } from 'node:crypto';
 import { API_GROUP_VERSION, RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import sshpk from 'sshpk';
 import { authorize } from '../auth/authorize';
+import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
-import { client, coreApi, impersonatedOptions } from '../plugins/k8s';
+import { client, coreApi } from '../plugins/k8s';
 
 interface ImportBody {
   name: string;
@@ -68,9 +69,10 @@ function secretData(
 
 /**
  * Convenience routes backing the UI's "Generate" / "Upload a file" SSH key creation modes (the
- * plain create route already covers "reference an existing Secret"). Creates the Secret and the
- * AnsibleSSHKey/ClusterAnsibleSSHKey in one call, both impersonated as the calling user — same
- * as every other CRUD path, so authorization is real RBAC, not API-side logic.
+ * plain create route already covers "reference an existing Secret"). Gated on the caller's
+ * `import` grant for the desired namespace (no existing object yet, same shape as a plain
+ * CREATE), then creates the Secret and the AnsibleSSHKey/ClusterAnsibleSSHKey as the API's own
+ * identity — same as every other CRUD path post-RBAC-replacement.
  */
 export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
   return app
@@ -79,8 +81,18 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
       async ({ params, body, headers, set }) => {
         const auth = await authorize(extractBearerToken(headers), 'user');
         if (auth instanceof Response) return auth;
-        const { session } = auth;
         const importBody = body as ImportBody;
+
+        const perms = await resolveEffectivePermissions(auth.session, auth.role);
+        if (!canAct(perms, { type: 'AnsibleSSHKey', namespace: params.namespace }, 'import')) {
+          set.status = 403;
+          return {
+            error: 'forbidden',
+            type: 'AnsibleSSHKey',
+            namespace: params.namespace,
+            action: 'import',
+          };
+        }
 
         const resolved = await resolvePrivateKeyContent(importBody);
         if (!resolved.ok) {
@@ -88,17 +100,14 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
           return { error: resolved.error };
         }
 
-        await coreApi.createNamespacedSecret(
-          {
-            namespace: params.namespace,
-            body: {
-              metadata: { name: importBody.name },
-              type: 'kubernetes.io/ssh-auth',
-              data: secretData(resolved.content, importBody.passphrase),
-            },
+        await coreApi.createNamespacedSecret({
+          namespace: params.namespace,
+          body: {
+            metadata: { name: importBody.name },
+            type: 'kubernetes.io/ssh-auth',
+            data: secretData(resolved.content, importBody.passphrase),
           },
-          impersonatedOptions(session.identity),
-        );
+        });
 
         set.status = 201;
         return client.create(
@@ -114,7 +123,7 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
                 : {}),
             },
           },
-          session.identity,
+          'self',
           params.namespace,
         );
       },
@@ -123,7 +132,6 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
     .post('/api/v1/clusteransiblesshkeys/import', async ({ body, headers, set }) => {
       const auth = await authorize(extractBearerToken(headers), 'user');
       if (auth instanceof Response) return auth;
-      const { session } = auth;
       const importBody = body as ImportBody & { secretNamespace: string };
       if (!importBody.secretNamespace) {
         set.status = 400;
@@ -133,23 +141,26 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
         };
       }
 
+      const perms = await resolveEffectivePermissions(auth.session, auth.role);
+      if (!canAct(perms, { type: 'ClusterAnsibleSSHKey' }, 'import')) {
+        set.status = 403;
+        return { error: 'forbidden', type: 'ClusterAnsibleSSHKey', action: 'import' };
+      }
+
       const resolved = await resolvePrivateKeyContent(importBody);
       if (!resolved.ok) {
         set.status = 400;
         return { error: resolved.error };
       }
 
-      await coreApi.createNamespacedSecret(
-        {
-          namespace: importBody.secretNamespace,
-          body: {
-            metadata: { name: importBody.name },
-            type: 'kubernetes.io/ssh-auth',
-            data: secretData(resolved.content, importBody.passphrase),
-          },
+      await coreApi.createNamespacedSecret({
+        namespace: importBody.secretNamespace,
+        body: {
+          metadata: { name: importBody.name },
+          type: 'kubernetes.io/ssh-auth',
+          data: secretData(resolved.content, importBody.passphrase),
         },
-        impersonatedOptions(session.identity),
-      );
+      });
 
       set.status = 201;
       return client.create(
@@ -175,7 +186,7 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
               : {}),
           },
         },
-        session.identity,
+        'self',
       );
     });
 }

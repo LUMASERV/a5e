@@ -2,17 +2,24 @@ import { RESOURCE_DESCRIPTORS } from '@a5e/schemas';
 import cors from '@elysiajs/cors';
 import { Elysia } from 'elysia';
 import { bootstrapAdminAccount } from './auth/bootstrap';
+import { migrateLegacyUsersIfNeeded } from './auth/migrate-legacy-users';
 import { registerAuthRoutes } from './auth/routes';
 import type { AnyElysia } from './lib/elysia-types';
 import { registerAncillaryRoutes } from './modules/ancillary';
 import { registerAnsibleJobRoutes } from './modules/ansiblejobs';
 import { registerAnsibleRunRoutes } from './modules/ansibleruns';
+import { registerChangeRequestRoutes } from './modules/change-requests';
 import { registerInventoryDownloadRoutes } from './modules/inventory-download';
 import { registerOidcSettingsRoutes } from './modules/oidc-settings';
+import { registerPermissionsSettingsRoutes } from './modules/permissions-settings';
 import { registerResourceRoutes } from './modules/resource-routes';
 import { registerSSHKeyImportRoutes } from './modules/sshkey-import';
 import { registerUsersSettingsRoutes } from './modules/users-settings';
 
+// Migration must run before bootstrap: otherwise a not-yet-migrated deployment with real legacy
+// accounts would look "empty" to bootstrapAdminAccount() and get a fresh admin account created
+// alongside them, instead of the legacy accounts being carried over as-is.
+await migrateLegacyUsersIfNeeded();
 await bootstrapAdminAccount();
 
 let app: AnyElysia = new Elysia()
@@ -48,11 +55,16 @@ app = registerAuthRoutes(app);
 app = registerAncillaryRoutes(app);
 app = registerOidcSettingsRoutes(app);
 app = registerUsersSettingsRoutes(app);
+app = registerPermissionsSettingsRoutes(app);
 app = registerSSHKeyImportRoutes(app); // before the generic routes: same base paths + a literal "import" segment
 app = registerInventoryDownloadRoutes(app); // same base paths + a literal "download" segment
 for (const descriptor of RESOURCE_DESCRIPTORS) {
+  if (descriptor.kind === 'ChangeRequest') continue; // registered below with bespoke create/delete
+  if (descriptor.kind === 'Group') continue; // fully custom, admin-only routes — see permissions-settings.ts
+  if (descriptor.kind === 'User') continue; // fully custom, admin-only routes — see users-settings.ts
   app = registerResourceRoutes(app, descriptor);
 }
+app = registerChangeRequestRoutes(app);
 app = registerAnsibleRunRoutes(app);
 app = registerAnsibleJobRoutes(app);
 

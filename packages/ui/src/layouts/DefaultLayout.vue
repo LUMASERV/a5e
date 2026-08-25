@@ -7,19 +7,49 @@ import {
   Monitor,
   Odometer,
   Setting,
+  Tickets,
   Timer,
   VideoPlay,
 } from '@element-plus/icons-vue';
-import { onMounted } from 'vue';
+import { onMounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useChangeRequestDraftStore } from '../stores/changeRequestDraft';
 import { useNamespaceStore } from '../stores/namespace';
 
 const auth = useAuthStore();
 const namespaceStore = useNamespaceStore();
+const draftStore = useChangeRequestDraftStore();
+const router = useRouter();
 
 onMounted(() => {
   namespaceStore.load();
 });
+
+// `App.vue` renders DefaultLayout as soon as the router's *initial* placeholder route resolves
+// `meta.public`/`meta.bare` to false — which happens before the router's own beforeEach guard has
+// actually awaited auth.check() on a hard reload. Rehydrating on plain onMounted would then run
+// with auth.session still null, silently finding no identity to key the stored draft by. Watch
+// for the session to actually become available instead (immediate covers the normal case where
+// it's already set by the time this component mounts, e.g. right after a login redirect).
+watch(
+  () => auth.session,
+  (session) => {
+    if (session) draftStore.rehydrate();
+  },
+  { immediate: true },
+);
+
+// Starting a draft is deliberately not a navigation — the whole point is to keep browsing the
+// page you're already on and stage changes as you go. Only once a draft is under way does the
+// button become the entry point into reviewing it.
+function onChangeRequestButtonClick() {
+  if (!draftStore.started) {
+    draftStore.start();
+  } else {
+    router.push('/change-requests/draft');
+  }
+}
 
 const navGroups = [
   {
@@ -54,6 +84,10 @@ const navGroups = [
           <el-icon><Odometer /></el-icon>
           <span>Dashboard</span>
         </el-menu-item>
+        <el-menu-item index="/change-requests">
+          <el-icon><Tickets /></el-icon>
+          <span>Change Requests</span>
+        </el-menu-item>
         <el-sub-menu v-for="group in navGroups" :key="group.title" :index="group.title">
           <template #title>
             <el-icon><Connection /></el-icon>
@@ -78,6 +112,9 @@ const navGroups = [
           <el-menu-item index="/settings/users">
             <span>Users</span>
           </el-menu-item>
+          <el-menu-item index="/settings/groups">
+            <span>Groups</span>
+          </el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -93,7 +130,12 @@ const navGroups = [
         </el-select>
         <div v-else />
         <div style="display: flex; align-items: center; gap: 12px">
-          <span v-if="auth.session">{{ auth.session.displayName }}</span>
+          <el-button size="small" :type="draftStore.started ? 'warning' : undefined" @click="onChangeRequestButtonClick">
+            {{ draftStore.started ? `Change request (${draftStore.items.length})` : 'Start change request' }}
+          </el-button>
+          <el-button v-if="auth.session" link @click="router.push('/account')">
+            {{ auth.session.displayName }}
+          </el-button>
           <el-button size="small" @click="auth.logout">Log out</el-button>
         </div>
       </el-header>

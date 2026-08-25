@@ -11,6 +11,7 @@ const store = useClusterPlaybookStore();
     :store="store"
     :namespaced="false"
     create-path="/cluster-playbooks/new"
+    resource-type="ClusterAnsiblePlaybook"
     :edit-path="(item) => `/cluster-playbooks/${item.metadata.name}/edit`"
   >
     <template #columns>

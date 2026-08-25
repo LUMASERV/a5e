@@ -5,7 +5,9 @@ import { ElMessage } from 'element-plus';
 import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import YAML from 'yaml';
+import LabelsEditor from '../../components/LabelsEditor.vue';
 import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
+import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useJobStore } from '../../stores/resources';
 
@@ -13,13 +15,19 @@ const props = defineProps<{ namespace?: string; name?: string }>();
 const router = useRouter();
 const namespaceStore = useNamespaceStore();
 const store = useJobStore();
+const draftStore = useChangeRequestDraftStore();
 
 const isEdit = Boolean(props.name);
 const formNamespace = props.namespace ?? namespaceStore.current;
 const extraVarsText = ref('');
 
-const form = reactive<{ name: string; spec: AnsibleJobSpec }>({
+const form = reactive<{
+  name: string;
+  labels: Record<string, string> | undefined;
+  spec: AnsibleJobSpec;
+}>({
   name: props.name ?? '',
+  labels: undefined,
   spec: {
     template: {
       playbookRef: { kind: 'AnsiblePlaybook', name: '' },
@@ -36,6 +44,7 @@ onMounted(async () => {
   if (isEdit && props.namespace && props.name) {
     const existing = await store.get(props.name, props.namespace);
     form.spec = existing.spec;
+    form.labels = existing.metadata.labels;
     extraVarsText.value = existing.spec.template.extraVars
       ? YAML.stringify(existing.spec.template.extraVars)
       : '';
@@ -56,19 +65,24 @@ async function save() {
   try {
     if (isEdit) {
       const existing = await store.get(form.name, namespace);
-      await store.update(form.name, { ...existing, spec }, namespace);
+      await store.update(
+        form.name,
+        { ...existing, metadata: { ...existing.metadata, labels: form.labels }, spec },
+        namespace,
+        existing,
+      );
     } else {
       await store.create(
         {
           apiVersion: API_GROUP_VERSION,
           kind: 'AnsibleJob',
-          metadata: { name: form.name, namespace },
+          metadata: { name: form.name, namespace, labels: form.labels },
           spec,
         },
         namespace,
       );
     }
-    ElMessage.success('Saved');
+    ElMessage.success(draftStore.isActive ? 'Added to change request draft' : 'Saved');
     router.push('/jobs');
   } catch (err) {
     ElMessage.error((err as Error).message);
@@ -82,6 +96,9 @@ async function save() {
     <el-form label-width="200px">
       <el-form-item label="Name">
         <el-input v-model="form.name" :disabled="isEdit" style="max-width: 400px" />
+      </el-form-item>
+      <el-form-item label="Labels">
+        <LabelsEditor v-model="form.labels" />
       </el-form-item>
 
       <ObjectRefPicker

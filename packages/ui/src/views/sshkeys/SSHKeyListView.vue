@@ -14,6 +14,7 @@ const store = useSSHKeyStore();
     :namespaced="true"
     :namespace="namespaceStore.current"
     create-path="/sshkeys/new"
+    resource-type="AnsibleSSHKey"
     :edit-path="(item) => `/sshkeys/${item.metadata.namespace}/${item.metadata.name}`"
   >
     <template #columns>

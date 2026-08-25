@@ -4,15 +4,19 @@ import { ElMessage } from 'element-plus';
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { apiClient } from '../../api/client';
+import LabelsEditor from '../../components/LabelsEditor.vue';
+import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useClusterSSHKeyStore } from '../../stores/resources';
 
 const router = useRouter();
 const store = useClusterSSHKeyStore();
 const namespaceStore = useNamespaceStore();
+const draftStore = useChangeRequestDraftStore();
 
 type Mode = 'existing' | 'upload' | 'generate';
-const mode = ref<Mode>('generate');
+const mode = ref<Mode>(draftStore.isActive ? 'existing' : 'generate');
+const labels = ref<Record<string, string> | undefined>(undefined);
 const form = reactive({
   name: '',
   secretName: '',
@@ -44,7 +48,7 @@ async function save() {
       await store.create({
         apiVersion: API_GROUP_VERSION,
         kind: 'ClusterAnsibleSSHKey',
-        metadata: { name: form.name },
+        metadata: { name: form.name, labels: labels.value },
         spec: {
           secretRef: {
             name: form.secretName,
@@ -68,9 +72,10 @@ async function save() {
         privateKey: mode.value === 'upload' ? form.privateKey : undefined,
         passphrase: form.passphrase || undefined,
         secretNamespace: form.secretNamespace || namespaceStore.current,
+        labels: labels.value,
       });
     }
-    ElMessage.success('Saved');
+    ElMessage.success(draftStore.isActive ? 'Added to change request draft' : 'Saved');
     router.push('/cluster-sshkeys');
   } catch (err) {
     ElMessage.error((err as Error).message);
@@ -87,6 +92,13 @@ async function save() {
       title="Cluster-scoped keys require an explicit Secret namespace — there's no owning namespace to default to."
       style="margin-bottom: 16px"
     />
+    <el-alert
+      v-if="draftStore.isActive"
+      type="info"
+      :closable="false"
+      title="Generate and Upload aren't stageable in a change request — use Existing secret, or finish/cancel your draft first."
+      style="margin-bottom: 16px"
+    />
     <el-form label-width="160px">
       <el-form-item label="Name">
         <el-input v-model="form.name" />
@@ -96,8 +108,8 @@ async function save() {
       </el-form-item>
       <el-form-item label="Source">
         <el-radio-group v-model="mode">
-          <el-radio-button value="generate">Generate</el-radio-button>
-          <el-radio-button value="upload">Upload file</el-radio-button>
+          <el-radio-button value="generate" :disabled="draftStore.isActive">Generate</el-radio-button>
+          <el-radio-button value="upload" :disabled="draftStore.isActive">Upload file</el-radio-button>
           <el-radio-button value="existing">Existing secret</el-radio-button>
         </el-radio-group>
       </el-form-item>
