@@ -8,6 +8,7 @@ import type { AnyElysia } from './lib/elysia-types';
 import { registerAncillaryRoutes } from './modules/ancillary';
 import { registerAnsibleJobRoutes } from './modules/ansiblejobs';
 import { registerAnsibleRunRoutes } from './modules/ansibleruns';
+import { registerAppSettingsRoutes } from './modules/app-settings';
 import { registerChangeRequestRoutes } from './modules/change-requests';
 import { registerInventoryDownloadRoutes } from './modules/inventory-download';
 import { registerOidcSettingsRoutes } from './modules/oidc-settings';
@@ -56,6 +57,7 @@ app = registerAncillaryRoutes(app);
 app = registerOidcSettingsRoutes(app);
 app = registerUsersSettingsRoutes(app);
 app = registerPermissionsSettingsRoutes(app);
+app = registerAppSettingsRoutes(app);
 app = registerSSHKeyImportRoutes(app); // before the generic routes: same base paths + a literal "import" segment
 app = registerInventoryDownloadRoutes(app); // same base paths + a literal "download" segment
 for (const descriptor of RESOURCE_DESCRIPTORS) {

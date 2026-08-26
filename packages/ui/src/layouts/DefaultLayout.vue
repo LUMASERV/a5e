@@ -13,17 +13,20 @@ import {
 } from '@element-plus/icons-vue';
 import { onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useAppSettingsStore } from '../stores/appSettings';
 import { useAuthStore } from '../stores/auth';
 import { useChangeRequestDraftStore } from '../stores/changeRequestDraft';
 import { useNamespaceStore } from '../stores/namespace';
 
 const auth = useAuthStore();
 const namespaceStore = useNamespaceStore();
+const appSettings = useAppSettingsStore();
 const draftStore = useChangeRequestDraftStore();
 const router = useRouter();
 
 onMounted(() => {
   namespaceStore.load();
+  appSettings.load();
 });
 
 // `App.vue` renders DefaultLayout as soon as the router's *initial* placeholder route resolves
@@ -84,7 +87,7 @@ const navGroups = [
           <el-icon><Odometer /></el-icon>
           <span>Dashboard</span>
         </el-menu-item>
-        <el-menu-item index="/change-requests">
+        <el-menu-item v-if="appSettings.changeRequestsEnabled" index="/change-requests">
           <el-icon><Tickets /></el-icon>
           <span>Change Requests</span>
         </el-menu-item>
@@ -115,6 +118,9 @@ const navGroups = [
           <el-menu-item index="/settings/groups">
             <span>Groups</span>
           </el-menu-item>
+          <el-menu-item index="/settings/change-requests">
+            <span>Change Requests</span>
+          </el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -130,7 +136,12 @@ const navGroups = [
         </el-select>
         <div v-else />
         <div style="display: flex; align-items: center; gap: 12px">
-          <el-button size="small" :type="draftStore.started ? 'warning' : undefined" @click="onChangeRequestButtonClick">
+          <el-button
+            v-if="appSettings.changeRequestsEnabled"
+            size="small"
+            :type="draftStore.started ? 'warning' : undefined"
+            @click="onChangeRequestButtonClick"
+          >
             {{ draftStore.started ? `Change request (${draftStore.items.length})` : 'Start change request' }}
           </el-button>
           <el-button v-if="auth.session" link @click="router.push('/account')">
