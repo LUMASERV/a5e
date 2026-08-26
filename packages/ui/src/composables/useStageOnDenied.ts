@@ -1,6 +1,7 @@
 import { ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import { ApiError } from '../api/client';
+import { useAppSettingsStore } from '../stores/appSettings';
 import { useChangeRequestDraftStore } from '../stores/changeRequestDraft';
 import type { MutationIntent } from '../stores/createResourceStore';
 
@@ -14,6 +15,7 @@ import type { MutationIntent } from '../stores/createResourceStore';
  */
 export function useStageOnDenied() {
   const draftStore = useChangeRequestDraftStore();
+  const appSettings = useAppSettingsStore();
   const router = useRouter();
 
   async function withStageOnDenied<T>(
@@ -24,6 +26,9 @@ export function useStageOnDenied() {
       return await directCall();
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 403) throw err;
+      // The flow is switched off for this install — surface the plain permission-denied error
+      // instead of offering an upsell into a flow that would just 403 again on submit.
+      if (!appSettings.changeRequestsEnabled) throw err;
       try {
         await ElMessageBox.confirm(
           "You don't have direct permission to do this. Submit as a change request for approval instead?",

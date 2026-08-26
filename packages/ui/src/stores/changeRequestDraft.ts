@@ -7,6 +7,7 @@ import {
   loadDraftEnvelope,
   saveDraftEnvelope,
 } from '../lib/changeRequestDraftStorage';
+import { useAppSettingsStore } from './appSettings';
 import { useAuthStore } from './auth';
 import type { MutationIntent, MutationInterceptorResult } from './createResourceStore';
 import { registerMutationInterceptor } from './createResourceStore';
@@ -45,7 +46,12 @@ export const useChangeRequestDraftStore = defineStore('changeRequestDraft', () =
   const reason = ref('');
   const items = ref<DraftItem[]>([]);
 
-  const isActive = computed(() => started.value);
+  // Gated on the app-wide toggle too, not just `started`: a draft rehydrated from localStorage
+  // (see rehydrate() below) can have started=true from before an admin turned the flow off
+  // mid-session — every consumer of `isActive` (the mutation interceptor, ResourceListView's
+  // "added to draft" messaging, ObjectRefPicker's staged-item lookups) should treat that the same
+  // as no draft being active, not keep quietly capturing into a request nothing can submit.
+  const isActive = computed(() => started.value && useAppSettingsStore().changeRequestsEnabled);
 
   function currentUserId(): string | undefined {
     return useAuthStore().session?.identity.impersonateUser;
@@ -132,6 +138,8 @@ export function registerChangeRequestInterceptor(pinia: Pinia): void {
   registerMutationInterceptor((intent): MutationInterceptorResult => {
     if (intent.type === 'ChangeRequest') return { staged: false };
     if (!(STAGEABLE_KINDS as readonly string[]).includes(intent.type)) return { staged: false };
+    // isActive itself accounts for the app-wide toggle (see its definition above) — a draft
+    // started before an admin turned the flow off mid-session stops capturing immediately.
     if (!draftStore.isActive) return { staged: false };
     draftStore.addItem(intent);
     return { staged: true, result: synthesizeResult(intent) };

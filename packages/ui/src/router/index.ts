@@ -242,6 +242,12 @@ const routes = [
     props: true,
     meta: { requiresAdmin: true },
   },
+  {
+    path: '/settings/change-requests',
+    name: 'settings-change-requests',
+    component: () => import('../views/ChangeRequestsSettingsView.vue'),
+    meta: { requiresAdmin: true },
+  },
 
   {
     path: '/:pathMatch(.*)*',

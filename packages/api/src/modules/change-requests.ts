@@ -9,6 +9,7 @@ import { authorize } from '../auth/authorize';
 import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { Session } from '../auth/session';
+import { readAppSettings } from '../lib/app-settings-store';
 import type { AnyElysia } from '../lib/elysia-types';
 import { client } from '../plugins/k8s';
 import { registerResourceRoutes } from './resource-routes';
@@ -48,6 +49,16 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
     .post('/api/v1/changerequests', async ({ headers, body, set }) => {
       const auth = await authorize(extractBearerToken(headers), 'user');
       if (auth instanceof Response) return auth;
+
+      // Gate creation only — an admin toggling this off shouldn't strand ChangeRequests already
+      // in flight, so list/get/watch/approve/decline/withdraw stay reachable regardless. This is
+      // the real enforcement point; the UI additionally hides its own entry points (nav item,
+      // header button, "stage on denied" upsell) as a courtesy, not as the source of truth.
+      const settings = await readAppSettings();
+      if (!settings.changeRequestsEnabled) {
+        set.status = 403;
+        return { error: 'the change request flow is disabled for this instance' };
+      }
 
       const b = body as {
         metadata?: { name?: string; generateName?: string };

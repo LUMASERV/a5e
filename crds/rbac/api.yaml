@@ -120,6 +120,16 @@ rules:
     resources: ["configmaps"]
     resourceNames: ["a5e-oidc-user-roles"]
     verbs: ["get", "delete"]
+  # a5e-app-settings: runtime feature toggles (currently just "is the change-request flow
+  # enabled") — see lib/app-settings-store.ts. Not sensitive, so a ConfigMap rather than a Secret;
+  # same resourceNames-doesn't-apply-to-create caveat as the Secrets above.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["a5e-app-settings"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
