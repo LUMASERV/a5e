@@ -26,6 +26,11 @@ export function useStageOnDenied() {
       return await directCall();
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 403) throw err;
+      // The store defaults to `changeRequestsEnabled: true` until its own load() resolves, so a
+      // 403 arriving before DefaultLayout's mount-time load has finished must wait for the real
+      // value here rather than trusting that default — otherwise a fresh page load with the flow
+      // actually disabled could still show the upsell below.
+      await appSettings.ensureLoaded().catch(() => undefined);
       // The flow is switched off for this install — surface the plain permission-denied error
       // instead of offering an upsell into a flow that would just 403 again on submit.
       if (!appSettings.changeRequestsEnabled) throw err;

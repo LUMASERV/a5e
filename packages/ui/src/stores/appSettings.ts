@@ -15,11 +15,27 @@ interface AppSettingsResponse {
 export const useAppSettingsStore = defineStore('appSettings', () => {
   const changeRequestsEnabled = ref(true);
   const loaded = ref(false);
+  let inFlight: Promise<void> | null = null;
 
   async function load() {
-    const result = await apiClient.get<AppSettingsResponse>('/config/app-settings');
-    changeRequestsEnabled.value = result.changeRequestsEnabled;
-    loaded.value = true;
+    const promise = apiClient.get<AppSettingsResponse>('/config/app-settings').then((result) => {
+      changeRequestsEnabled.value = result.changeRequestsEnabled;
+      loaded.value = true;
+    });
+    inFlight = promise.finally(() => {
+      if (inFlight === promise) inFlight = null;
+    });
+    return inFlight;
+  }
+
+  /** For call sites that need the real value before deciding anything (e.g. `useStageOnDenied`'s
+   * "offer to stage this?" upsell) rather than tolerating the `true`-until-loaded default —
+   * DefaultLayout's unconditional `load()` on mount races with a 403 that can happen right away,
+   * so a decision keyed on the flag should wait for whichever load is already in flight (or start
+   * one) instead of reading a possibly-stale default. */
+  async function ensureLoaded() {
+    if (loaded.value) return;
+    await (inFlight ?? load());
   }
 
   async function setChangeRequestsEnabled(value: boolean) {
@@ -29,5 +45,5 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     changeRequestsEnabled.value = result.changeRequestsEnabled;
   }
 
-  return { changeRequestsEnabled, loaded, load, setChangeRequestsEnabled };
+  return { changeRequestsEnabled, loaded, load, ensureLoaded, setChangeRequestsEnabled };
 });

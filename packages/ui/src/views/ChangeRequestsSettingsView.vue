@@ -17,8 +17,11 @@ onMounted(async () => {
   }
 });
 
+// `el-switch` without active-value/inactive-value always emits a real boolean — but take the
+// actual pre-toggle value from the store rather than inferring it by negating what was emitted,
+// so a revert-on-failure is correct even if that ever stops holding.
 async function onToggle(value: string | number | boolean) {
-  const previous = !value;
+  const previous = appSettings.changeRequestsEnabled;
   saving.value = true;
   try {
     await appSettings.setChangeRequestsEnabled(Boolean(value));
