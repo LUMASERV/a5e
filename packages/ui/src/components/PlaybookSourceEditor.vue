@@ -23,7 +23,7 @@ function updateInline(playbook: string) {
 }
 function updateConfigMapRef(patch: Partial<{ name: string; namespace: string; key: string }>) {
   emit('update:modelValue', {
-    configMapRef: { ...props.modelValue.configMapRef, name: '', ...patch },
+    configMapRef: { name: '', ...props.modelValue.configMapRef, ...patch },
   });
 }
 function updateGit(
@@ -35,7 +35,7 @@ function updateGit(
     basicAuthSecretRef: { name: string; namespace?: string } | undefined;
   }>,
 ) {
-  emit('update:modelValue', { git: { ...props.modelValue.git, url: '', ...patch } });
+  emit('update:modelValue', { git: { url: '', ...props.modelValue.git, ...patch } });
 }
 
 type GitAuthMode = 'none' | 'ssh' | 'basic';
