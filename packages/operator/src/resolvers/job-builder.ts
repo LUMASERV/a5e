@@ -23,6 +23,10 @@ export interface JobBuildInput {
   runUid: string;
   namespace: string;
   runnerImage: string;
+  /** Appended to the Job/pod name (`ansiblerun-<runName>[-<nameSuffix>]`) and, when set, recorded
+   * as the `<API_GROUP>/run-shard` pod label — set to the shard index for a `parallel`-enabled
+   * run's per-shard Jobs, omitted for a non-parallel run's single Job. */
+  nameSuffix?: string;
   inventoryConfigMapName: string;
   /** Set when the playbook source is `inline`/`configMapRef` — mounted at /config. */
   playbookConfigMapName?: string;
@@ -44,6 +48,7 @@ export interface JobBuildInput {
 
 const RUN_LABEL = `${API_GROUP}/run`;
 const RUN_UID_LABEL = `${API_GROUP}/run-uid`;
+const RUN_SHARD_LABEL = `${API_GROUP}/run-shard`;
 
 function ansibleExtraArgs(options: AnsibleOptions | undefined): string {
   if (!options) return '';
@@ -148,13 +153,18 @@ export function buildJobSpec(input: JobBuildInput): k8s.V1Job {
     });
   }
 
-  const podLabels = { [RUN_LABEL]: input.runName, [RUN_UID_LABEL]: input.runUid };
+  const podLabels = {
+    [RUN_LABEL]: input.runName,
+    [RUN_UID_LABEL]: input.runUid,
+    ...(input.nameSuffix !== undefined ? { [RUN_SHARD_LABEL]: input.nameSuffix } : {}),
+  };
+  const jobName = `ansiblerun-${input.runName}${input.nameSuffix !== undefined ? `-${input.nameSuffix}` : ''}`;
 
   const job: k8s.V1Job = {
     apiVersion: 'batch/v1',
     kind: 'Job',
     metadata: {
-      name: `ansiblerun-${input.runName}`,
+      name: jobName,
       namespace: input.namespace,
       labels: podLabels,
       ownerReferences: [

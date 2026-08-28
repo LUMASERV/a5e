@@ -17,6 +17,7 @@ const extraVarsText = ref('');
 const form = reactive<AnsibleRunSpec>({
   playbookRef: { kind: 'AnsiblePlaybook', name: '' },
   inventoryRef: { kind: 'AnsibleInventory', name: '' },
+  parallel: { enabled: false, maxAmountOfHosts: 1, maxConcurrentRuns: 10 },
 });
 
 async function submit() {
@@ -68,6 +69,19 @@ async function submit() {
       <el-form-item label="Extra vars (YAML)">
         <el-input v-model="extraVarsText" type="textarea" :rows="6" placeholder="key: value" />
       </el-form-item>
+
+      <el-form-item label="Run in parallel">
+        <el-switch v-model="form.parallel!.enabled" />
+      </el-form-item>
+      <template v-if="form.parallel?.enabled">
+        <el-form-item label="Hosts per pod">
+          <el-input-number v-model="form.parallel!.maxAmountOfHosts" :min="1" />
+        </el-form-item>
+        <el-form-item label="Max concurrent pods">
+          <el-input-number v-model="form.parallel!.maxConcurrentRuns" :min="1" />
+        </el-form-item>
+      </template>
+
       <el-form-item>
         <el-button type="primary" @click="submit">Launch</el-button>
       </el-form-item>

@@ -122,6 +122,22 @@ spec:
                       type: object
                       additionalProperties:
                         type: string
+                parallel:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    maxAmountOfHosts:
+                      type: integer
+                      exclusiveMinimum: true
+                      minimum: 0
+                      default: 1
+                    maxConcurrentRuns:
+                      type: integer
+                      exclusiveMinimum: true
+                      minimum: 0
+                      default: 10
                 cancel:
                   type: boolean
               required:
@@ -244,3 +260,78 @@ spec:
                       required:
                         - bucket
                         - key
+                shards:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      index:
+                        type: integer
+                        minimum: 0
+                      hosts:
+                        type: array
+                        items:
+                          type: string
+                      phase:
+                        type: string
+                        enum:
+                          - Pending
+                          - Resolving
+                          - Running
+                          - Succeeded
+                          - Failed
+                          - Error
+                          - Cancelled
+                      startTime:
+                        type: string
+                      completionTime:
+                        type: string
+                      jobRef:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                        required:
+                          - name
+                      podName:
+                        type: string
+                      exitCode:
+                        type: integer
+                      failedStep:
+                        type: string
+                        enum:
+                          - GitClone
+                          - DependencyInstall
+                          - Playbook
+                      logs:
+                        type: object
+                        properties:
+                          podRef:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              container:
+                                type: string
+                            required:
+                              - name
+                              - container
+                          s3:
+                            type: object
+                            properties:
+                              bucket:
+                                type: string
+                              key:
+                                type: string
+                              endpoint:
+                                type: string
+                              sizeBytes:
+                                type: integer
+                              uploadedAt:
+                                type: string
+                            required:
+                              - bucket
+                              - key
+                    required:
+                      - index
+                      - hosts
