@@ -7,6 +7,7 @@ import type {
 } from '@a5e/schemas';
 import { authorize } from '../auth/authorize';
 import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
+import { deniedSecretUse } from '../auth/secret-use';
 import { extractBearerToken } from '../auth/session';
 import type { Session } from '../auth/session';
 import { readAppSettings } from '../lib/app-settings-store';
@@ -135,9 +136,17 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
+      // The approver's `approve` grant per item, plus — for a host item carrying `varsBySecret` —
+      // a `use` grant on every Secret it names. Approving is the moment the change becomes real,
+      // so it's the approver who must be allowed to hand the operator those Secrets, exactly as
+      // the direct write path checks the writer (auth/secret-use.ts).
       const denied = cr.spec.changes
         .map((item, index) => ({ index, item }))
-        .filter(({ item }) => !canAct(perms, itemTarget(item), 'approve'));
+        .filter(
+          ({ item }) =>
+            !canAct(perms, itemTarget(item), 'approve') ||
+            deniedSecretUse(perms, item.type, item.namespace, item.body),
+        );
       if (denied.length > 0) {
         set.status = 403;
         return { error: 'forbidden', deniedItems: denied.map((d) => d.index) };

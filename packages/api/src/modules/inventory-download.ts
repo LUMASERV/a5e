@@ -1,12 +1,18 @@
-import { type JumpChainHop, type ResolvedGroup, resolveInventoryGroups } from '@a5e/k8s-client';
-import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
+import {
+  type JumpChainHop,
+  type ResolvedGroup,
+  type SecretReader,
+  mergeSecretVars,
+  resolveInventoryGroups,
+} from '@a5e/k8s-client';
+import { RESOURCE_DESCRIPTORS_BY_KIND, maskSecretValues } from '@a5e/schemas';
 import type { AnsibleInventorySpec, AnsibleInventoryStatus, CustomResource } from '@a5e/schemas';
 import YAML from 'yaml';
 import { authorize } from '../auth/authorize';
 import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { AnyElysia } from '../lib/elysia-types';
-import { client } from '../plugins/k8s';
+import { client, coreApi } from '../plugins/k8s';
 
 function hopToSshTarget(hop: JumpChainHop): string {
   const userPrefix = hop.user ? `${hop.user}@` : '';
@@ -15,11 +21,25 @@ function hopToSshTarget(hop: JumpChainHop): string {
 }
 
 /**
+ * Reads a Secret as the API's own identity, for the sole purpose of listing which host vars a
+ * `varsBySecret` entry contributes — every value it returns is masked before it reaches the
+ * response body (see `maskSecretValues` below).
+ */
+const secretReader: SecretReader = {
+  getSecret: (namespace, name) => coreApi.readNamespacedSecret({ name, namespace }),
+};
+
+/**
  * Renders already-resolved groups (host lookups + jump chain flattening done by
  * `resolveInventoryGroups` beforehand) as Ansible's YAML inventory format — for humans to
  * download and run `ansible-playbook -i` with directly, not what AnsibleRun Jobs actually use
  * (those get an INI rendering via renderInventoryIni, plus a per-host SSH key mount path that
  * only means anything inside a Job's Pod, deliberately omitted here).
+ *
+ * Secret-sourced host vars (`AnsibleHost.spec.varsBySecret`) appear here by name with their
+ * values MASKED — the download is a human-readable view of what the inventory resolves to, not a
+ * credential export, and `download` is a far weaker grant than `use` on the Secrets themselves.
+ * A downloaded file therefore needs those vars supplied another way before it will actually run.
  */
 export function renderInventoryYaml(
   topLevelVars: Record<string, unknown> | undefined,
@@ -40,7 +60,11 @@ export function renderInventoryYaml(
         const proxyJump = host.jumpChain.map(hopToSshTarget).join(',');
         hostVars.ansible_ssh_common_args = `-o StrictHostKeyChecking=accept-new -J ${proxyJump}`;
       }
-      Object.assign(hostVars, host.spec.vars ?? {});
+      Object.assign(
+        hostVars,
+        maskSecretValues(mergeSecretVars(host.varsSecrets)),
+        host.spec.vars ?? {},
+      );
       hostsNode[inventoryHostname] = hostVars;
     }
 
@@ -86,7 +110,10 @@ async function handleDownload(
   // Internal reference traversal (Hosts via jump chains) is not individually re-checked per
   // referenced object — same trust model the operator already uses once you can see/download an
   // Inventory (see permission-engine.ts plan notes); only ChangeRequest items get per-item checks.
-  const groups = await resolveInventoryGroups(client, 'self', obj.spec, namespace, true);
+  const groups = await resolveInventoryGroups(client, 'self', obj.spec, namespace, {
+    resolveJumpChains: true,
+    secretReader,
+  });
   const yaml = renderInventoryYaml(obj.spec.vars, groups);
 
   return new Response(yaml, {

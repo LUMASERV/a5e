@@ -108,6 +108,17 @@ spec:
                 vars:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                varsBySecret:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                      - name
                 enabled:
                   type: boolean
                   default: true
