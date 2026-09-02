@@ -98,11 +98,22 @@ export function deriveOidcUsername(
 }
 
 /**
- * Resolves `desired` to a username no other identity already claims, suffixing `-2`, `-3`, ...
- * until it's free. Two identities sharing a username must never happen: it's the key password
- * hashes are stored under (user-passwords.ts) and the `local:<username>` impersonation identity a
- * promoted account gets, so a collision would silently conflate two people. `exceptCRName` is the
- * CR being created/updated itself, which obviously doesn't count as a competing claim.
+ * Resolves `desired` to a username no other identity currently claims, suffixing `-2`, `-3`, ...
+ * until it's free. `exceptCRName` is the CR being created/updated itself, which obviously doesn't
+ * count as a competing claim.
+ *
+ * Best-effort by construction, and deliberately so: this is list-then-choose, so two first-logins
+ * racing each other (or landing on different API replicas) can both see the same name free and
+ * both write it. Kubernetes can only enforce uniqueness on object *names*, and these CRs are named
+ * after the `sub`, so there's nothing to make the choice atomic short of a separate index object
+ * or a validating webhook — too much machinery for what a collision actually costs here.
+ *
+ * What it costs is cosmetic: two SSO-only rows showing the same username. Neither can log in with
+ * a password (no hash exists, and `hasPassword` is gated on being a local account), so nothing is
+ * conflated. The invariant that actually matters — one password hash and one `local:<username>`
+ * impersonation identity per username — is enforced where it's established rather than here: a
+ * promotion creates `local-<username>`, and the API server rejects the second create of that name
+ * atomically, so only one of the two can ever become a local account.
  */
 async function claimUsername(desired: string, exceptCRName: string): Promise<string> {
   const taken = new Set(
@@ -227,9 +238,14 @@ export async function linkAccountToSub(
   emailVerified: boolean,
   sub: string,
 ): Promise<LocalIdentity | undefined> {
-  if (!email || !emailVerified) return undefined;
+  if (!emailVerified) return undefined;
+  // Normalize before the emptiness check, not after: a whitespace-only claim is not an email, and
+  // comparing it trimmed would otherwise match a local account whose own email is blank or
+  // whitespace (nothing stops one — legacy migration copies the old store's value verbatim, and a
+  // User CR can be created with kubectl), linking a real SSO identity to an arbitrary account.
+  const normalized = email?.trim().toLowerCase();
+  if (!normalized) return undefined;
   const users = await listUserCRs();
-  const normalized = email.trim().toLowerCase();
   const match = users.find(
     (u) => isLocalAccount(u) && u.spec.email?.trim().toLowerCase() === normalized,
   );
@@ -318,8 +334,16 @@ export async function pruneSupersededOidcIdentities(): Promise<void> {
       .filter((sub): sub is string => Boolean(sub)),
   );
   if (claimedSubs.size === 0) return;
+  // Deliberately narrower than "not a local account": a CR only qualifies if its name is exactly
+  // the one this code derives for its own `sub`, i.e. it really is a tracker `trackOidcLogin`
+  // created. Anything else carrying a claimed sub — a hand-written CR, a future naming scheme — is
+  // left alone rather than deleted on an assumption about what it is.
   const superseded = users.filter(
-    (u) => !isLocalAccount(u) && u.spec.sub && claimedSubs.has(u.spec.sub),
+    (u) =>
+      !isLocalAccount(u) &&
+      u.spec.sub &&
+      claimedSubs.has(u.spec.sub) &&
+      u.metadata.name === oidcCRName(u.spec.sub),
   );
   for (const cr of superseded) await deleteUserCR(cr.metadata.name);
   if (superseded.length > 0) {

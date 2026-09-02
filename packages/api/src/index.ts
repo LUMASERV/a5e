@@ -27,7 +27,10 @@ await bootstrapAdminAccount();
 // must never be what makes the account store look empty. Failing this is not worth refusing to
 // serve over: it only tidies up already-inert duplicate rows.
 await pruneSupersededOidcIdentities().catch((err) => {
-  console.warn(`could not prune duplicate SSO identity records: ${(err as Error).message}`);
+  // Log the error itself, not just its message — whatever went wrong here (RBAC on the User CRD,
+  // a transient API error) is diagnosed from the stack and any structured fields the k8s client
+  // attaches, and this is the only trace of it.
+  console.warn('could not prune duplicate SSO identity records:', err);
 });
 
 let app: AnyElysia = new Elysia()
