@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { commonStatusFields } from './common';
 import { inventoryRefSchema, playbookRefSchema } from './refs';
-import { ansibleOptionsSchema, resourceRequirementsSchema } from './runs';
+import { ansibleOptionsSchema, parallelConfigSchema, resourceRequirementsSchema } from './runs';
 
 /** Everything an AnsibleRun spawned from this Job is created with — the same shape as
  * AnsibleRunSpec minus `cancel` (a job spawns fresh runs; it never inherits a stale cancel flag). */
@@ -14,6 +14,7 @@ export const ansibleJobTemplateSchema = z.object({
   ttlSecondsAfterFinished: z.number().int().nonnegative().optional(),
   serviceAccountName: z.string().optional(),
   resources: resourceRequirementsSchema.optional(),
+  parallel: parallelConfigSchema.optional(),
 });
 export type AnsibleJobTemplate = z.infer<typeof ansibleJobTemplateSchema>;
 

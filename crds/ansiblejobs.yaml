@@ -122,6 +122,22 @@ spec:
                           type: object
                           additionalProperties:
                             type: string
+                    parallel:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        maxAmountOfHosts:
+                          type: integer
+                          exclusiveMinimum: true
+                          minimum: 0
+                          default: 1
+                        maxConcurrentRuns:
+                          type: integer
+                          exclusiveMinimum: true
+                          minimum: 0
+                          default: 10
                   required:
                     - playbookRef
                     - inventoryRef

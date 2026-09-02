@@ -32,6 +32,7 @@ const form = reactive<{
     template: {
       playbookRef: { kind: 'AnsiblePlaybook', name: '' },
       inventoryRef: { kind: 'AnsibleInventory', name: '' },
+      parallel: { enabled: false, maxAmountOfHosts: 1, maxConcurrentRuns: 10 },
     },
     suspend: false,
     concurrencyPolicy: 'Allow',
@@ -44,6 +45,7 @@ onMounted(async () => {
   if (isEdit && props.namespace && props.name) {
     const existing = await store.get(props.name, props.namespace);
     form.spec = existing.spec;
+    form.spec.template.parallel ??= { enabled: false, maxAmountOfHosts: 1, maxConcurrentRuns: 10 };
     form.labels = existing.metadata.labels;
     extraVarsText.value = existing.spec.template.extraVars
       ? YAML.stringify(existing.spec.template.extraVars)
@@ -118,6 +120,18 @@ async function save() {
       <el-form-item label="Extra vars (YAML)">
         <el-input v-model="extraVarsText" type="textarea" :rows="4" placeholder="key: value" />
       </el-form-item>
+
+      <el-form-item label="Run in parallel">
+        <el-switch v-model="form.spec.template.parallel!.enabled" />
+      </el-form-item>
+      <template v-if="form.spec.template.parallel?.enabled">
+        <el-form-item label="Hosts per pod">
+          <el-input-number v-model="form.spec.template.parallel!.maxAmountOfHosts" :min="1" />
+        </el-form-item>
+        <el-form-item label="Max concurrent pods">
+          <el-input-number v-model="form.spec.template.parallel!.maxConcurrentRuns" :min="1" />
+        </el-form-item>
+      </template>
 
       <el-form-item label="Schedule (cron)">
         <el-input v-model="form.spec.schedule" placeholder="e.g. 0 3 * * * — omit for manual-trigger only" style="max-width: 400px" />

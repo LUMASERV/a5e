@@ -7,6 +7,7 @@ import {
 import {
   API_GROUP_VERSION,
   type AnsibleInventorySpec,
+  type AnsibleOptions,
   type AnsiblePlaybookSpec,
   type AnsibleRunSpec,
   type AnsibleRunStatus,
@@ -18,10 +19,13 @@ import {
   type FailedStep,
   RESOURCE_DESCRIPTORS_BY_KIND,
   type ResourceDescriptor,
+  type RunLogs,
+  type RunShardStatus,
 } from '@a5e/schemas';
 import type * as k8s from '@kubernetes/client-node';
 import type { CoreResources } from '../k8s/core';
 import type { ReconcileResult } from '../k8s/informer';
+import { type HostShard, limitForHostNames, shardHosts } from '../resolvers/host-sharding';
 import { renderInventoryIni } from '../resolvers/inventory-render';
 import { type JobBuildInput, type SshKeyMount, buildJobSpec } from '../resolvers/job-builder';
 import { resolveRef } from '../resolvers/object-ref';
@@ -29,6 +33,7 @@ import { buildRequirementsYaml } from '../resolvers/requirements-yaml';
 import { type S3Config, uploadRunLog } from '../s3/uploader';
 
 const TERMINAL_PHASES = new Set(['Succeeded', 'Failed', 'Error', 'Cancelled']);
+const TERMINAL_SHARD_PHASES = new Set(['Succeeded', 'Failed', 'Error']);
 
 function ownerRef(obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>): k8s.V1OwnerReference {
   return {
@@ -158,6 +163,260 @@ async function resolveHostSshKeys(
   return { requeue: false, mounts: [...mountByRefKey.values()] };
 }
 
+/** Everything both the single-Job and shard-Job paths need, resolved once up front. Re-resolving
+ * this later (see pollParallelRun) to fill in shard slots as concurrency frees up is deliberately
+ * safe to do again: every write here (Secrets, ConfigMaps) is an upsert keyed by a name derived
+ * only from `namePrefix`, so re-running it reproduces the same objects rather than duplicating
+ * them. */
+interface PreparedRun {
+  owner: k8s.V1OwnerReference;
+  namePrefix: string;
+  groups: ResolvedGroup[];
+  /** ONE inventory ConfigMap for the whole run, containing every resolved host — shared by every
+   * shard's Job, never a per-shard partial one (see host-sharding.ts's doc comment for why). */
+  inventoryConfigMapName: string;
+  sshKeyMounts: SshKeyMount[];
+  extraVarsConfigMapName: string;
+  entryPoint: string;
+  playbookConfigMapName?: string;
+  gitSource?: JobBuildInput['gitSource'];
+  playbookPath?: string;
+  hasDependencies: boolean;
+  requirementsConfigMapName?: string;
+}
+
+async function prepareRunResources(
+  client: CustomResourceClient,
+  core: CoreResources,
+  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
+): Promise<{ requeue: true } | ({ requeue: false } & PreparedRun)> {
+  const namespace = obj.metadata.namespace!;
+  const runName = obj.metadata.name;
+
+  const playbookObj = await resolveRef<AnsiblePlaybookSpec, unknown>(
+    client,
+    obj.spec.playbookRef,
+    namespace,
+  );
+  const inventoryObj = await resolveRef<AnsibleInventorySpec, unknown>(
+    client,
+    obj.spec.inventoryRef,
+    namespace,
+  );
+
+  const owner = ownerRef(obj);
+  const namePrefix = `ansiblerun-${runName}`;
+
+  // Inventory: resolve hosts + jump chains, then each host's own SSH key (plan: keys are a
+  // host property, not a run property).
+  // `inventoryObj.metadata.namespace` is already the resolved, validated namespace (or
+  // `undefined` for a ClusterAnsibleInventory) — read it directly rather than recomputing from
+  // `obj.spec.inventoryRef` a second time, so there's only one place (resolveRef, above) that
+  // ever decides whether a cross-namespace inventoryRef was legitimate.
+  const groups = await resolveInventoryGroups(
+    client,
+    'self',
+    inventoryObj.spec,
+    inventoryObj.metadata.namespace,
+    true,
+  );
+
+  const sshKeyResult = await resolveHostSshKeys(client, core, namespace, namePrefix, owner, groups);
+  if (sshKeyResult.requeue) {
+    return { requeue: true }; // controller-ordering dependency — sshkey-controller hasn't derived it yet
+  }
+
+  // One shared inventory ConfigMap for the whole run — every shard's pod (for a `parallel` run)
+  // mounts this SAME ConfigMap and is scoped to its own hosts via `--limit` rather than each
+  // getting its own partial inventory (host-sharding.ts's doc comment has the full rationale).
+  const inventoryCm = await core.createOrUpdateConfigMap(namespace, {
+    metadata: { name: `${namePrefix}-inventory`, namespace, ownerReferences: [owner] },
+    data: { 'inventory.ini': renderInventoryIni(inventoryObj.spec.vars, groups) },
+  });
+
+  // Extra vars: playbook defaults, then the run's own overrides win.
+  const mergedExtraVars = {
+    ...(playbookObj.spec.extraVars ?? {}),
+    ...(obj.spec.extraVars ?? {}),
+  };
+  const extraVarsCm = await core.createOrUpdateConfigMap(namespace, {
+    metadata: { name: `${namePrefix}-extravars`, namespace, ownerReferences: [owner] },
+    data: { 'extra-vars.json': JSON.stringify(mergedExtraVars) },
+  });
+
+  // Playbook content: inline and configMapRef are both copied into one operator-owned ConfigMap
+  // in the Run's namespace. This deviates from the plan's stated "configMapRef is mounted
+  // directly, not snapshotted" — a Kubernetes Volume can only mount a ConfigMap in the SAME
+  // namespace as the Pod, and a referenced ConfigMap can legitimately live in a different
+  // namespace (or the playbook itself can), so direct cross-namespace mounting is not actually
+  // possible. Copying is the only technically viable option; as a side effect it also pins
+  // configMapRef content per-run, which is arguably more consistent (all three source kinds
+  // are now equally reproducible) — documented here as a correction, not a silent departure.
+  const entryPoint = playbookObj.spec.entryPoint ?? 'playbook.yml';
+  let playbookConfigMapName: string | undefined;
+  let gitSource: JobBuildInput['gitSource'];
+  let playbookPath: string | undefined;
+
+  // Namespaced AnsiblePlaybook must never be allowed to point its own configMapRef/git secret
+  // refs at a foreign namespace either — same rule, same rationale as resolveRefNamespace's
+  // doc comment (a namespaced owner's refs must stay in its own namespace).
+  const playbookDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[obj.spec.playbookRef.kind]!;
+  const playbookOwnNamespace =
+    playbookDescriptor.scope === 'Namespaced' ? playbookObj.metadata.namespace : undefined;
+
+  if (playbookObj.spec.source.inline) {
+    const cm = await core.createOrUpdateConfigMap(namespace, {
+      metadata: { name: `${namePrefix}-playbook`, namespace, ownerReferences: [owner] },
+      data: { [entryPoint]: playbookObj.spec.source.inline.playbook },
+    });
+    playbookConfigMapName = cm.metadata!.name!;
+  } else if (playbookObj.spec.source.configMapRef) {
+    const ref = playbookObj.spec.source.configMapRef;
+    const refNamespace =
+      resolveRefNamespace('Namespaced', ref.namespace, playbookOwnNamespace) ?? namespace;
+    const sourceCm = await core.getConfigMap(refNamespace, ref.name);
+    const key = ref.key ?? 'playbook.yml';
+    const content = sourceCm.data?.[key];
+    if (!content) throw new Error(`ConfigMap ${refNamespace}/${ref.name} has no key "${key}"`);
+    const cm = await core.createOrUpdateConfigMap(namespace, {
+      metadata: { name: `${namePrefix}-playbook`, namespace, ownerReferences: [owner] },
+      data: { [entryPoint]: content },
+    });
+    playbookConfigMapName = cm.metadata!.name!;
+  } else if (playbookObj.spec.source.git) {
+    const git = playbookObj.spec.source.git;
+    let sshKeySecretName: string | undefined;
+    let basicAuthSecretName: string | undefined;
+
+    if (git.sshKeySecretRef) {
+      const secretNamespace =
+        resolveRefNamespace('Namespaced', git.sshKeySecretRef.namespace, playbookOwnNamespace) ??
+        namespace;
+      const sourceSecret = await core.getSecret(secretNamespace, git.sshKeySecretRef.name);
+      sshKeySecretName = `${namePrefix}-git-sshkey`;
+      await core.createOrUpdateSecret(namespace, {
+        metadata: { name: sshKeySecretName, namespace, ownerReferences: [owner] },
+        type: sourceSecret.type,
+        data: sourceSecret.data,
+      });
+    } else if (git.basicAuthSecretRef) {
+      const secretNamespace =
+        resolveRefNamespace('Namespaced', git.basicAuthSecretRef.namespace, playbookOwnNamespace) ??
+        namespace;
+      const sourceSecret = await core.getSecret(secretNamespace, git.basicAuthSecretRef.name);
+      basicAuthSecretName = `${namePrefix}-git-basicauth`;
+      await core.createOrUpdateSecret(namespace, {
+        metadata: { name: basicAuthSecretName, namespace, ownerReferences: [owner] },
+        type: sourceSecret.type,
+        data: sourceSecret.data,
+      });
+    }
+
+    gitSource = { url: git.url, revision: git.revision, sshKeySecretName, basicAuthSecretName };
+    playbookPath = git.path;
+  }
+
+  // Dependencies (Galaxy roles/collections).
+  const hasDependencies = Boolean(
+    playbookObj.spec.dependencies?.roles?.length ||
+      playbookObj.spec.dependencies?.collections?.length,
+  );
+  let requirementsConfigMapName: string | undefined;
+  if (hasDependencies) {
+    const cm = await core.createOrUpdateConfigMap(namespace, {
+      metadata: { name: `${namePrefix}-requirements`, namespace, ownerReferences: [owner] },
+      data: { 'requirements.yml': buildRequirementsYaml(playbookObj.spec.dependencies!) },
+    });
+    requirementsConfigMapName = cm.metadata!.name!;
+  }
+
+  return {
+    requeue: false,
+    owner,
+    namePrefix,
+    groups,
+    inventoryConfigMapName: inventoryCm.metadata!.name!,
+    sshKeyMounts: sshKeyResult.mounts,
+    extraVarsConfigMapName: extraVarsCm.metadata!.name!,
+    entryPoint,
+    playbookConfigMapName,
+    gitSource,
+    playbookPath,
+    hasDependencies,
+    requirementsConfigMapName,
+  };
+}
+
+/** `ansibleOptions` defaults to `prep`'s run-level options; pass an override (e.g. a shard's
+ * `--limit`-merged copy — see `startShardJob`) to use different ones for one Job. */
+function jobBuildInputFor(
+  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
+  runnerImage: string,
+  prep: PreparedRun,
+  nameSuffix?: string,
+  ansibleOptionsOverride?: AnsibleOptions,
+): JobBuildInput {
+  return {
+    runName: obj.metadata.name,
+    runUid: obj.metadata.uid!,
+    namespace: obj.metadata.namespace!,
+    runnerImage,
+    nameSuffix,
+    inventoryConfigMapName: prep.inventoryConfigMapName,
+    playbookConfigMapName: prep.playbookConfigMapName,
+    gitSource: prep.gitSource,
+    playbookPath: prep.playbookPath,
+    entryPoint: prep.entryPoint,
+    hasDependencies: prep.hasDependencies,
+    requirementsConfigMapName: prep.requirementsConfigMapName,
+    extraVarsConfigMapName: prep.extraVarsConfigMapName,
+    sshKeyMounts: prep.sshKeyMounts,
+    ansibleOptions: ansibleOptionsOverride ?? obj.spec.ansibleOptions,
+    timeoutSeconds: obj.spec.timeoutSeconds,
+    serviceAccountName: obj.spec.serviceAccountName,
+    resources: obj.spec.resources as k8s.V1ResourceRequirements | undefined,
+  };
+}
+
+/**
+ * Creates one shard's Job (mounting the run's single shared inventory ConfigMap, scoped to this
+ * shard's hosts via `--limit` — see host-sharding.ts's doc comment) and returns its initial
+ * `Running` status. Safe to call again for the same `shard.index` (`createJob` falls back to
+ * reading the existing Job on a 409), which is exactly what happens when `pollParallelRun` fills
+ * a previously-`Pending` slot after `prepareRunResources` re-resolved everything from scratch.
+ *
+ * A run-level `ansibleOptions.limit` (if the user also set one) is combined with the shard's own
+ * via Ansible's `:&` intersection operator, so a shard never runs outside hosts the user already
+ * restricted to.
+ */
+async function startShardJob(
+  core: CoreResources,
+  runnerImage: string,
+  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
+  prep: PreparedRun,
+  shard: HostShard,
+): Promise<RunShardStatus> {
+  const namespace = obj.metadata.namespace!;
+  const baseLimit = obj.spec.ansibleOptions?.limit;
+  const ansibleOptions: AnsibleOptions = {
+    ...obj.spec.ansibleOptions,
+    limit: baseLimit ? `${baseLimit}:&${shard.limit}` : shard.limit,
+  };
+
+  const jobSpec = buildJobSpec(
+    jobBuildInputFor(obj, runnerImage, prep, String(shard.index), ansibleOptions),
+  );
+  const job = await core.createJob(namespace, jobSpec);
+
+  return {
+    index: shard.index,
+    hosts: shard.hostNames,
+    phase: 'Running',
+    startTime: new Date().toISOString(),
+    jobRef: { name: job.metadata!.name! },
+  };
+}
+
 /**
  * Main AnsibleRun reconcile flow (plan §3.4). Simplification vs. the plan's full aspiration: a
  * single `Ready` condition tracks phase instead of separate Resolved/JobCreated/LogsPersisted
@@ -179,6 +438,11 @@ export async function reconcileRun(
     if (status.jobRef) {
       await core.deleteJob(namespace, status.jobRef.name).catch(() => undefined);
     }
+    for (const shard of status.shards ?? []) {
+      if (shard.jobRef) {
+        await core.deleteJob(namespace, shard.jobRef.name).catch(() => undefined);
+      }
+    }
     await patchRunStatus(client, descriptor, obj, {
       phase: 'Cancelled',
       completionTime: new Date().toISOString(),
@@ -190,8 +454,9 @@ export async function reconcileRun(
     return; // done — logs were already finalized when the phase was set terminal (see pollRun)
   }
 
-  if (status.phase === 'Running' && status.jobRef) {
-    return pollRun(client, core, descriptor, s3Config, obj);
+  if (status.phase === 'Running') {
+    if (status.shards) return pollParallelRun(client, core, descriptor, runnerImage, s3Config, obj);
+    if (status.jobRef) return pollRun(client, core, descriptor, s3Config, obj);
   }
 
   return startRun(client, core, descriptor, runnerImage, obj);
@@ -212,181 +477,23 @@ async function startRun(
       await patchRunStatus(client, descriptor, obj, { phase: 'Resolving' });
     }
 
-    const playbookObj = await resolveRef<AnsiblePlaybookSpec, unknown>(
-      client,
-      obj.spec.playbookRef,
-      namespace,
-    );
-    const inventoryObj = await resolveRef<AnsibleInventorySpec, unknown>(
-      client,
-      obj.spec.inventoryRef,
-      namespace,
-    );
-
-    const owner = ownerRef(obj);
-    const namePrefix = `ansiblerun-${runName}`;
-
-    // Inventory: resolve hosts + jump chains, then each host's own SSH key (plan: keys are a
-    // host property, not a run property), then render + an operator-owned, owner-ref'd
-    // ConfigMap — the immutable per-run snapshot, independent of later changes to
-    // AnsibleInventory/AnsibleHost (plan §3.4 step 2e).
-    // `inventoryObj.metadata.namespace` is already the resolved, validated namespace (or
-    // `undefined` for a ClusterAnsibleInventory) — read it directly rather than recomputing from
-    // `obj.spec.inventoryRef` a second time, so there's only one place (resolveRef, above) that
-    // ever decides whether a cross-namespace inventoryRef was legitimate.
-    const groups = await resolveInventoryGroups(
-      client,
-      'self',
-      inventoryObj.spec,
-      inventoryObj.metadata.namespace,
-      true,
-    );
-
-    const sshKeyResult = await resolveHostSshKeys(
-      client,
-      core,
-      namespace,
-      namePrefix,
-      owner,
-      groups,
-    );
-    if (sshKeyResult.requeue) {
+    const prep = await prepareRunResources(client, core, obj);
+    if (prep.requeue) {
       return { requeueAfterMs: 3000 }; // controller-ordering dependency — sshkey-controller hasn't derived it yet
     }
-    const sshKeyMounts = sshKeyResult.mounts;
 
-    const inventoryIni = renderInventoryIni(inventoryObj.spec.vars, groups);
-    const inventoryCm = await core.createOrUpdateConfigMap(namespace, {
-      metadata: { name: `${namePrefix}-inventory`, namespace, ownerReferences: [owner] },
-      data: { 'inventory.ini': inventoryIni },
-    });
-
-    // Extra vars: playbook defaults, then the run's own overrides win.
-    const mergedExtraVars = {
-      ...(playbookObj.spec.extraVars ?? {}),
-      ...(obj.spec.extraVars ?? {}),
-    };
-    const extraVarsCm = await core.createOrUpdateConfigMap(namespace, {
-      metadata: { name: `${namePrefix}-extravars`, namespace, ownerReferences: [owner] },
-      data: { 'extra-vars.json': JSON.stringify(mergedExtraVars) },
-    });
-
-    // Playbook content: inline and configMapRef are both copied into one operator-owned ConfigMap
-    // in the Run's namespace. This deviates from the plan's stated "configMapRef is mounted
-    // directly, not snapshotted" — a Kubernetes Volume can only mount a ConfigMap in the SAME
-    // namespace as the Pod, and a referenced ConfigMap can legitimately live in a different
-    // namespace (or the playbook itself can), so direct cross-namespace mounting is not actually
-    // possible. Copying is the only technically viable option; as a side effect it also pins
-    // configMapRef content per-run, which is arguably more consistent (all three source kinds
-    // are now equally reproducible) — documented here as a correction, not a silent departure.
-    const entryPoint = playbookObj.spec.entryPoint ?? 'playbook.yml';
-    let playbookConfigMapName: string | undefined;
-    let gitSource: JobBuildInput['gitSource'];
-    let playbookPath: string | undefined;
-
-    // Namespaced AnsiblePlaybook must never be allowed to point its own configMapRef/git secret
-    // refs at a foreign namespace either — same rule, same rationale as resolveRefNamespace's
-    // doc comment (a namespaced owner's refs must stay in its own namespace).
-    const playbookDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[obj.spec.playbookRef.kind]!;
-    const playbookOwnNamespace =
-      playbookDescriptor.scope === 'Namespaced' ? playbookObj.metadata.namespace : undefined;
-
-    if (playbookObj.spec.source.inline) {
-      const cm = await core.createOrUpdateConfigMap(namespace, {
-        metadata: { name: `${namePrefix}-playbook`, namespace, ownerReferences: [owner] },
-        data: { [entryPoint]: playbookObj.spec.source.inline.playbook },
-      });
-      playbookConfigMapName = cm.metadata!.name!;
-    } else if (playbookObj.spec.source.configMapRef) {
-      const ref = playbookObj.spec.source.configMapRef;
-      const refNamespace =
-        resolveRefNamespace('Namespaced', ref.namespace, playbookOwnNamespace) ?? namespace;
-      const sourceCm = await core.getConfigMap(refNamespace, ref.name);
-      const key = ref.key ?? 'playbook.yml';
-      const content = sourceCm.data?.[key];
-      if (!content) throw new Error(`ConfigMap ${refNamespace}/${ref.name} has no key "${key}"`);
-      const cm = await core.createOrUpdateConfigMap(namespace, {
-        metadata: { name: `${namePrefix}-playbook`, namespace, ownerReferences: [owner] },
-        data: { [entryPoint]: content },
-      });
-      playbookConfigMapName = cm.metadata!.name!;
-    } else if (playbookObj.spec.source.git) {
-      const git = playbookObj.spec.source.git;
-      let sshKeySecretName: string | undefined;
-      let basicAuthSecretName: string | undefined;
-
-      if (git.sshKeySecretRef) {
-        const secretNamespace =
-          resolveRefNamespace('Namespaced', git.sshKeySecretRef.namespace, playbookOwnNamespace) ??
-          namespace;
-        const sourceSecret = await core.getSecret(secretNamespace, git.sshKeySecretRef.name);
-        sshKeySecretName = `${namePrefix}-git-sshkey`;
-        await core.createOrUpdateSecret(namespace, {
-          metadata: { name: sshKeySecretName, namespace, ownerReferences: [owner] },
-          type: sourceSecret.type,
-          data: sourceSecret.data,
-        });
-      } else if (git.basicAuthSecretRef) {
-        const secretNamespace =
-          resolveRefNamespace(
-            'Namespaced',
-            git.basicAuthSecretRef.namespace,
-            playbookOwnNamespace,
-          ) ?? namespace;
-        const sourceSecret = await core.getSecret(secretNamespace, git.basicAuthSecretRef.name);
-        basicAuthSecretName = `${namePrefix}-git-basicauth`;
-        await core.createOrUpdateSecret(namespace, {
-          metadata: { name: basicAuthSecretName, namespace, ownerReferences: [owner] },
-          type: sourceSecret.type,
-          data: sourceSecret.data,
-        });
-      }
-
-      gitSource = { url: git.url, revision: git.revision, sshKeySecretName, basicAuthSecretName };
-      playbookPath = git.path;
+    if (obj.spec.parallel?.enabled) {
+      return startParallelRun(client, descriptor, core, runnerImage, obj, prep);
     }
 
-    // Dependencies (Galaxy roles/collections).
-    const hasDependencies = Boolean(
-      playbookObj.spec.dependencies?.roles?.length ||
-        playbookObj.spec.dependencies?.collections?.length,
-    );
-    let requirementsConfigMapName: string | undefined;
-    if (hasDependencies) {
-      const cm = await core.createOrUpdateConfigMap(namespace, {
-        metadata: { name: `${namePrefix}-requirements`, namespace, ownerReferences: [owner] },
-        data: { 'requirements.yml': buildRequirementsYaml(playbookObj.spec.dependencies!) },
-      });
-      requirementsConfigMapName = cm.metadata!.name!;
-    }
-
-    const jobSpec = buildJobSpec({
-      runName,
-      runUid: obj.metadata.uid!,
-      namespace,
-      runnerImage,
-      inventoryConfigMapName: inventoryCm.metadata!.name!,
-      playbookConfigMapName,
-      gitSource,
-      playbookPath,
-      entryPoint,
-      hasDependencies,
-      requirementsConfigMapName,
-      extraVarsConfigMapName: extraVarsCm.metadata!.name!,
-      sshKeyMounts,
-      ansibleOptions: obj.spec.ansibleOptions,
-      timeoutSeconds: obj.spec.timeoutSeconds,
-      serviceAccountName: obj.spec.serviceAccountName,
-      resources: obj.spec.resources as k8s.V1ResourceRequirements | undefined,
-    });
-
+    const jobSpec = buildJobSpec(jobBuildInputFor(obj, runnerImage, prep));
     const job = await core.createJob(namespace, jobSpec);
 
     await patchRunStatus(client, descriptor, obj, {
       phase: 'Running',
       startTime: new Date().toISOString(),
       jobRef: { name: job.metadata!.name! },
-      resolvedInventoryConfigMapRef: { name: inventoryCm.metadata!.name! },
+      resolvedInventoryConfigMapRef: { name: prep.inventoryConfigMapName },
     });
     return { requeueAfterMs: 3000 };
   } catch (err) {
@@ -400,6 +507,54 @@ async function startRun(
     );
     return;
   }
+}
+
+/**
+ * Splits the resolved inventory into shards (host-sharding.ts) and starts as many as
+ * `parallel.maxConcurrentRuns` allows right away; the rest are recorded `Pending` and picked up
+ * by `pollParallelRun` as earlier shards finish. A run whose inventory resolves to zero hosts
+ * finishes immediately — same as `ansible-playbook` against an empty inventory, nothing to do,
+ * not a failure.
+ */
+async function startParallelRun(
+  client: CustomResourceClient,
+  descriptor: ResourceDescriptor,
+  core: CoreResources,
+  runnerImage: string,
+  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
+  prep: PreparedRun,
+): Promise<ReconcileResult> {
+  const { maxAmountOfHosts, maxConcurrentRuns } = obj.spec.parallel!;
+  const shards = shardHosts(prep.groups, maxAmountOfHosts);
+
+  if (shards.length === 0) {
+    await patchRunStatus(client, descriptor, obj, {
+      phase: 'Succeeded',
+      startTime: new Date().toISOString(),
+      completionTime: new Date().toISOString(),
+      resolvedInventoryConfigMapRef: { name: prep.inventoryConfigMapName },
+      shards: [],
+    });
+    return;
+  }
+
+  const shardStatuses: RunShardStatus[] = [];
+  for (const shard of shards) {
+    const activeCount = shardStatuses.filter((s) => s.phase === 'Running').length;
+    shardStatuses.push(
+      activeCount < maxConcurrentRuns
+        ? await startShardJob(core, runnerImage, obj, prep, shard)
+        : { index: shard.index, hosts: shard.hostNames, phase: 'Pending' },
+    );
+  }
+
+  await patchRunStatus(client, descriptor, obj, {
+    phase: 'Running',
+    startTime: new Date().toISOString(),
+    resolvedInventoryConfigMapRef: { name: prep.inventoryConfigMapName },
+    shards: shardStatuses,
+  });
+  return { requeueAfterMs: 3000 };
 }
 
 const STEP_BY_INIT_CONTAINER: Record<string, FailedStep> = {
@@ -424,34 +579,41 @@ function mainExitCode(pod: k8s.V1Pod): number | undefined {
     ?.terminated?.exitCode;
 }
 
-async function pollRun(
-  client: CustomResourceClient,
-  core: CoreResources,
-  descriptor: ResourceDescriptor,
-  s3Config: S3Config | undefined,
-  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
-): Promise<ReconcileResult> {
-  const namespace = obj.metadata.namespace!;
-  const jobName = obj.status!.jobRef!.name;
+interface JobPollResult {
+  succeeded: boolean;
+  podName?: string;
+  exitCode?: number;
+  failedStep?: FailedStep;
+  logs?: RunLogs;
+}
 
+/**
+ * Polls one Job to completion (shared by the single-Job and per-shard paths — a shard's Job is
+ * exactly as self-contained as a non-parallel run's). Returns `undefined` while the Job is still
+ * running, `'not-found'` if it disappeared out from under the run (e.g. deleted by hand), or the
+ * gathered pod/log/exit-code result once it has succeeded or failed. `logKey` is the S3 object
+ * key logs are archived under — namespaced by shard index for a parallel run so shards' logs
+ * never collide.
+ */
+async function pollJobToCompletion(
+  core: CoreResources,
+  namespace: string,
+  jobName: string,
+  s3Config: S3Config | undefined,
+  logKey: string,
+  ttlSecondsAfterFinished: number,
+): Promise<JobPollResult | 'not-found' | undefined> {
   let job: k8s.V1Job;
   try {
     job = await core.getJob(namespace, jobName);
-  } catch (err) {
-    await patchRunStatus(
-      client,
-      descriptor,
-      obj,
-      { phase: 'Error', completionTime: new Date().toISOString() },
-      { reason: 'JobNotFound', message: (err as Error).message },
-    );
-    return;
+  } catch {
+    return 'not-found';
   }
 
   const succeeded = (job.status?.succeeded ?? 0) > 0;
   const failed = (job.status?.failed ?? 0) > 0;
   if (!succeeded && !failed) {
-    return { requeueAfterMs: 5000 }; // still running — plain re-poll, not an error/backoff case
+    return undefined; // still running — plain re-poll, not an error/backoff case
   }
 
   const pods = await core.listPodsForJob(namespace, jobName).catch(() => [] as k8s.V1Pod[]);
@@ -477,42 +639,196 @@ async function pollRun(
     fullLogs = chunks.join('\n\n');
   }
 
-  let logs: AnsibleRunStatus['logs'] = podName
+  let logs: RunLogs | undefined = podName
     ? { podRef: { name: podName, container: 'ansible-playbook' } }
     : undefined;
   if (s3Config) {
     try {
-      const key = `${namespace}/${obj.metadata.name}/log.txt`;
-      const result = await uploadRunLog(s3Config, key, fullLogs);
+      const result = await uploadRunLog(s3Config, logKey, fullLogs);
       logs = {
         ...logs,
         s3: {
           bucket: s3Config.bucket,
-          key,
+          key: logKey,
           endpoint: s3Config.endpoint,
           sizeBytes: result.sizeBytes,
           uploadedAt: new Date().toISOString(),
         },
       };
     } catch (err) {
-      console.error(`[AnsibleRun] ${namespace}/${obj.metadata.name} S3 log upload failed`, err);
+      console.error(`[AnsibleRun] ${namespace}/${jobName} S3 log upload failed`, err);
     }
   }
 
   // Only shorten the Job's TTL once log capture is resolved (uploaded, or permanently given up
   // on) — this ordering is what protects logs from GC racing the upload (plan §3.4 step 3g).
   await core
-    .patchJob(namespace, jobName, {
-      spec: { ttlSecondsAfterFinished: obj.spec.ttlSecondsAfterFinished ?? 3600 },
-    })
+    .patchJob(namespace, jobName, { spec: { ttlSecondsAfterFinished } })
     .catch(() => undefined);
 
+  return { succeeded, podName, exitCode, failedStep, logs };
+}
+
+async function pollRun(
+  client: CustomResourceClient,
+  core: CoreResources,
+  descriptor: ResourceDescriptor,
+  s3Config: S3Config | undefined,
+  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
+): Promise<ReconcileResult> {
+  const namespace = obj.metadata.namespace!;
+  const jobName = obj.status!.jobRef!.name;
+
+  const result = await pollJobToCompletion(
+    core,
+    namespace,
+    jobName,
+    s3Config,
+    `${namespace}/${obj.metadata.name}/log.txt`,
+    obj.spec.ttlSecondsAfterFinished ?? 3600,
+  );
+
+  if (result === 'not-found') {
+    await patchRunStatus(
+      client,
+      descriptor,
+      obj,
+      { phase: 'Error', completionTime: new Date().toISOString() },
+      { reason: 'JobNotFound', message: `Job ${namespace}/${jobName} not found` },
+    );
+    return;
+  }
+  if (!result) {
+    return { requeueAfterMs: 5000 };
+  }
+
   await patchRunStatus(client, descriptor, obj, {
-    phase: succeeded ? 'Succeeded' : 'Failed',
+    phase: result.succeeded ? 'Succeeded' : 'Failed',
     completionTime: new Date().toISOString(),
-    podName,
-    exitCode,
-    failedStep,
-    logs,
+    podName: result.podName,
+    exitCode: result.exitCode,
+    failedStep: result.failedStep,
+    logs: result.logs,
   });
+}
+
+/** Shard-scoped counterpart of `pollRun` — same completion polling, but returns the updated shard
+ * status instead of patching the whole run (pollParallelRun batches all shards into one patch). */
+async function pollShardJob(
+  core: CoreResources,
+  namespace: string,
+  runName: string,
+  shard: RunShardStatus,
+  s3Config: S3Config | undefined,
+  ttlSecondsAfterFinished: number,
+): Promise<RunShardStatus | undefined> {
+  if (!shard.jobRef) return undefined;
+
+  const result = await pollJobToCompletion(
+    core,
+    namespace,
+    shard.jobRef.name,
+    s3Config,
+    `${namespace}/${runName}/shard-${shard.index}/log.txt`,
+    ttlSecondsAfterFinished,
+  );
+
+  if (result === 'not-found') {
+    return { ...shard, phase: 'Error', completionTime: new Date().toISOString() };
+  }
+  if (!result) return undefined; // still running, nothing changed for this shard
+
+  return {
+    ...shard,
+    phase: result.succeeded ? 'Succeeded' : 'Failed',
+    completionTime: new Date().toISOString(),
+    podName: result.podName,
+    exitCode: result.exitCode,
+    failedStep: result.failedStep,
+    logs: result.logs,
+  };
+}
+
+/**
+ * Polls every in-flight shard, then tops back up to `parallel.maxConcurrentRuns` from whichever
+ * shards are still `Pending` — so the run always has at most that many pods live at once, and a
+ * finishing shard immediately frees its slot for the next one instead of waiting for the whole
+ * batch. Re-resolving the inventory (`prepareRunResources`) only happens when there's actually a
+ * pending shard to start; once every shard has a Job, later ticks are pure polling.
+ */
+async function pollParallelRun(
+  client: CustomResourceClient,
+  core: CoreResources,
+  descriptor: ResourceDescriptor,
+  runnerImage: string,
+  s3Config: S3Config | undefined,
+  obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
+): Promise<ReconcileResult> {
+  const namespace = obj.metadata.namespace!;
+  const runName = obj.metadata.name;
+  const ttlSecondsAfterFinished = obj.spec.ttlSecondsAfterFinished ?? 3600;
+  const maxConcurrentRuns = obj.spec.parallel!.maxConcurrentRuns;
+
+  let changed = false;
+  const updated: RunShardStatus[] = [];
+  for (const shard of obj.status!.shards!) {
+    if (shard.phase === 'Running') {
+      const polled = await pollShardJob(
+        core,
+        namespace,
+        runName,
+        shard,
+        s3Config,
+        ttlSecondsAfterFinished,
+      );
+      if (polled) {
+        updated.push(polled);
+        changed = true;
+        continue;
+      }
+    }
+    updated.push(shard);
+  }
+
+  let freeSlots = maxConcurrentRuns - updated.filter((s) => s.phase === 'Running').length;
+  const hasPending = updated.some((s) => s.phase === 'Pending');
+
+  if (freeSlots > 0 && hasPending) {
+    try {
+      const prep = await prepareRunResources(client, core, obj);
+      if (!prep.requeue) {
+        for (let i = 0; i < updated.length && freeSlots > 0; i++) {
+          if (updated[i]!.phase !== 'Pending') continue;
+          const pendingShard = updated[i]!;
+          const shard: HostShard = {
+            index: pendingShard.index,
+            hostNames: pendingShard.hosts,
+            limit: limitForHostNames(prep.groups, pendingShard.hosts),
+          };
+          updated[i] = await startShardJob(core, runnerImage, obj, prep, shard);
+          freeSlots--;
+          changed = true;
+        }
+      }
+    } catch (err) {
+      console.error(`[AnsibleRun] ${namespace}/${runName} failed to start queued shard(s)`, err);
+    }
+  }
+
+  const allTerminal = updated.every((s) => s.phase && TERMINAL_SHARD_PHASES.has(s.phase));
+  if (allTerminal) {
+    const firstFailed = updated.find((s) => s.phase !== 'Succeeded');
+    await patchRunStatus(client, descriptor, obj, {
+      phase: firstFailed ? 'Failed' : 'Succeeded',
+      completionTime: new Date().toISOString(),
+      failedStep: firstFailed?.failedStep,
+      shards: updated,
+    });
+    return;
+  }
+
+  if (changed) {
+    await patchRunStatus(client, descriptor, obj, { shards: updated });
+  }
+  return { requeueAfterMs: 5000 };
 }
