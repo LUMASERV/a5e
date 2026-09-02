@@ -59,10 +59,21 @@ export type PermissionAction = (typeof PERMISSION_ACTIONS)[number] | '*';
  * Assigned to a `User` (see users.ts's `userSpecSchema.permissions`) or to a `Group` (see
  * groups.ts) that a user's `impersonateGroups` references.
  */
-export const permissionSchema = z.object({
-  type: permissionTypeSchema,
-  namespaces: z.array(z.string()).default([]),
-  labelSelector: labelSelectorSchema.optional(),
-  actions: z.array(permissionActionSchema).min(1),
-});
+export const permissionSchema = z
+  .object({
+    type: permissionTypeSchema,
+    namespaces: z.array(z.string()).default([]),
+    labelSelector: labelSelectorSchema.optional(),
+    actions: z.array(permissionActionSchema).min(1),
+  })
+  // A `Secret` grant is namespace-scoped only: a5e never reads a Secret's labels (it only
+  // dereferences one a host's `varsBySecretRef` names, possibly before that Secret even exists),
+  // so `canActIgnoringLabelSelector` skips the selector for this type. Refusing the field here is
+  // what keeps that from silently widening a grant an admin wrote intending to narrow — the
+  // alternative, honouring it, is not implementable, and quietly dropping it would be worse.
+  .refine((p) => p.type !== 'Secret' || p.labelSelector === undefined, {
+    message:
+      'labelSelector is not supported for type Secret — Secret grants are scoped by namespace only',
+    path: ['labelSelector'],
+  });
 export type Permission = z.infer<typeof permissionSchema>;

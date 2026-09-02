@@ -33,10 +33,15 @@ export const JUMP_HOST_CEL_MESSAGE =
  *
  * No `key` field on purpose: every key in the Secret becomes a var named after that key, so
  * adding a var is a Secret edit rather than a host edit.
+ *
+ * `min(1)` on both fields so the generated CRD carries `minLength: 1` and the API server itself
+ * rejects an empty string. The API's own `use`-grant check (api/src/auth/secret-use.ts) already
+ * refuses a nameless entry, but a `kubectl apply` bypasses that path entirely — and an empty name
+ * would otherwise persist happily and only surface much later as a failed Run.
  */
 export const varsBySecretRefSchema = z.object({
-  name: z.string(),
-  namespace: z.string().optional(),
+  name: z.string().min(1),
+  namespace: z.string().min(1).optional(),
 });
 export type VarsBySecretRef = z.infer<typeof varsBySecretRefSchema>;
 
@@ -77,7 +82,9 @@ export type AnsibleHostStatus = z.infer<typeof ansibleHostStatusSchema>;
 // The result is a narrowing of AnsibleHostSpec, so anything typed against that keeps accepting a
 // ClusterAnsibleHost's spec.
 export const clusterAnsibleHostSpecSchema = ansibleHostSpecSchema.extend({
-  varsBySecretRef: z.array(varsBySecretRefSchema.extend({ namespace: z.string() })).optional(),
+  varsBySecretRef: z
+    .array(varsBySecretRefSchema.extend({ namespace: z.string().min(1) }))
+    .optional(),
 });
 export type ClusterAnsibleHostSpec = z.infer<typeof clusterAnsibleHostSpecSchema>;
 

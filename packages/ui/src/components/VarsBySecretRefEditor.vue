@@ -46,9 +46,11 @@ function patchEntry(index: number, patch: Partial<VarsBySecretRef>) {
     </div>
     <el-button size="small" @click="addEntry">+ Add secret</el-button>
     <div style="color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px">
-      Every key in each Secret becomes a host var of the same name. Values are never shown back —
-      the resolved-inventory download masks them. Later entries override earlier ones, and a
-      matching key in Vars below overrides them all. Requires the <code>use</code> permission on
+      Every key in each Secret becomes a host var of the same name. Runs read the values from a
+      mounted copy of the Secret, so they never appear in the generated inventory; the
+      resolved-inventory download shows the var names with values over 5 characters masked. Later
+      entries override earlier ones, and a matching key in Vars below overrides them all. Requires
+      the <code>use</code> permission on
       <code>Secret</code>{{ namespaceRequired ? '' : ' in this host’s namespace' }}.
     </div>
   </div>

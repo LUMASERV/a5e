@@ -36,10 +36,12 @@ const secretReader: SecretReader = {
  * (those get an INI rendering via renderInventoryIni, plus a per-host SSH key mount path that
  * only means anything inside a Job's Pod, deliberately omitted here).
  *
- * Secret-sourced host vars (`AnsibleHost.spec.varsBySecretRef`) appear here by name with their
- * values MASKED — the download is a human-readable view of what the inventory resolves to, not a
- * credential export, and `download` is a far weaker grant than `use` on the Secrets themselves.
- * A downloaded file therefore needs those vars supplied another way before it will actually run.
+ * Secret-sourced host vars (`AnsibleHost.spec.varsBySecretRef`) appear here by name, with any
+ * value longer than `SECRET_VALUE_MASK_MIN_LENGTH` replaced by a mask — the download is a
+ * human-readable view of what the inventory resolves to, not a credential export, and `download`
+ * is a far weaker grant than `use` on the Secrets themselves. A downloaded file therefore needs
+ * those vars supplied another way before it will actually run. Values at or under that length are
+ * passed through verbatim; see secret-masking.ts for why the threshold exists.
  */
 export function renderInventoryYaml(
   topLevelVars: Record<string, unknown> | undefined,

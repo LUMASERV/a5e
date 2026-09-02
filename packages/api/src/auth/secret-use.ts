@@ -1,6 +1,6 @@
 import { resolveRefNamespace } from '@a5e/k8s-client';
 import type { AnsibleHostSpec, Permission } from '@a5e/schemas';
-import { canAct } from './permission-engine';
+import { canActIgnoringLabelSelector } from './permission-engine';
 
 /**
  * Kinds whose spec can name an arbitrary `v1/Secret` and have the operator dereference it — today
@@ -32,10 +32,11 @@ export interface SecretUseDenial {
  * Refs already stored on the object aren't re-checked — they were checked when they were set,
  * the same way `canAct` treats an object's existing labels.
  *
- * A `Secret` grant is matched on namespace only — its `labelSelector` is not consulted, since
- * that would mean reading the Secret to see its labels, and a host may legitimately reference a
- * Secret that doesn't exist yet (declarative ordering). PermissionsEditor.vue hides the label
- * selector for this type so the restriction can't be set and silently ignored.
+ * A `Secret` grant is matched on namespace only — hence `canActIgnoringLabelSelector` rather than
+ * `canAct`. Evaluating a selector would mean reading the Secret to see its labels, and a host may
+ * legitimately reference a Secret that doesn't exist yet (declarative ordering). `permissionSchema`
+ * rejects a `labelSelector` on a `Secret`-typed grant outright and PermissionsEditor.vue hides the
+ * field, so the restriction can't be written and then quietly ignored either.
  *
  * Returns the first ref the caller may not use, or `undefined` if every one is allowed.
  */
@@ -67,7 +68,7 @@ export function deniedSecretUse(
         message: `varsBySecretRef entry "${entry.name}" needs a namespace (${kind} is cluster-scoped)`,
       };
     }
-    if (!canAct(perms, { type: 'Secret', namespace }, 'use')) {
+    if (!canActIgnoringLabelSelector(perms, { type: 'Secret', namespace }, 'use')) {
       return {
         name: entry.name,
         namespace,

@@ -82,6 +82,12 @@ Three things follow from these values being real secrets:
   `SECRET_VALUE_MASK_MIN_LENGTH` (5) characters with `********`. A downloaded inventory therefore
   needs those vars supplied another way before `ansible-playbook -i` will work with it.
 
+  Note the threshold cuts both ways: a value of **5 characters or fewer is shown verbatim**. A mask
+  is a blanket substitution, and a 1–5 character value ("yes", "22", a single digit) collides with
+  unrelated text everywhere it appears — masking those would shred legitimate output to protect
+  something guessable in a handful of tries. Don't treat the download as safe for an audience that
+  shouldn't see very short secret values.
+
 ## Status conventions
 
 Every kind's `status` includes `observedGeneration` and a `conditions` list (the standard
