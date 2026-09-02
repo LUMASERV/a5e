@@ -7,6 +7,7 @@ import { apiClient } from '../api/client';
 interface AppUser {
   id: string;
   username?: string;
+  hasLocalAccount: boolean;
   sub?: string;
   email?: string;
   displayName?: string;
@@ -127,8 +128,9 @@ onMounted(load);
       have logged in at least once. A local account whose email matches an SSO login gets linked
       automatically (needs the "email" scope enabled in OIDC settings) and shows as a single row
       with both a username and an SSO identity — everyone else has just one or the other. New
-      identities appear here with role "none" on first SSO login. Editing an SSO-only row lets you
-      give it a username, turning it into a real local account it can be given a password for.
+      identities appear here with role "none" on first SSO login, under a username derived from
+      their SSO claims. Editing such a row lets you confirm or change that username, turning it
+      into a real local account it can be given a password for.
     </p>
 
     <el-table v-loading="loading" :data="users" style="width: 100%">
@@ -152,7 +154,7 @@ onMounted(load);
       </el-table-column>
       <el-table-column label="Password" width="90">
         <template #default="{ row }">
-          <el-tag v-if="row.username" :type="row.hasPassword ? 'success' : 'info'" size="small">
+          <el-tag v-if="row.hasLocalAccount" :type="row.hasPassword ? 'success' : 'info'" size="small">
             {{ row.hasPassword ? 'set' : 'none' }}
           </el-tag>
           <span v-else>—</span>

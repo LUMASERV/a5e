@@ -11,9 +11,26 @@
 
 If a local account's email matches an OIDC login's **verified** email, that OIDC identity gets
 linked to the local account automatically — from then on, either login method resolves to the
-same Kubernetes impersonation identity and app role. Linking only happens with an IdP-asserted
-`email_verified: true` claim, specifically so an unverified email on a permissive IdP can't be
-used to hijack an existing account.
+same Kubernetes impersonation identity and app role, and the two show up as a single row in
+Settings → Users. Linking only happens with an IdP-asserted `email_verified` claim (the boolean
+`true`, or the string `"true"` some IdPs emit instead), specifically so an unverified email on a
+permissive IdP can't be used to hijack an existing account.
+
+Linking also needs the **`email` scope**, which the default `openid profile` doesn't include —
+without it the token carries no `email` claim for linking to match on, so an SSO login that
+*should* have linked instead creates its own separate identity and the same person ends up listed
+twice under one email address. Add `email` in Settings → OIDC login (it isn't on by default
+because an IdP has to define that scope explicitly, and requesting an undefined one fails the
+login outright with `invalid_scope`).
+
+An SSO identity that matches no local account is recorded on its first login with app role
+`none`, so an admin has something to find and promote. It gets a **username derived from the
+IdP's claims** — `preferred_username`, else the local part of the email, else the raw `sub`,
+de-duplicated with a `-2`, `-3`, … suffix if another identity already holds it. That username is
+only a label until the identity is promoted (Settings → Users → Edit, which pre-fills it): a
+pure-SSO identity's Kubernetes impersonation identity stays its raw OIDC `sub`, and it has no
+password login. Promoting it turns it into a real local account, at which point the impersonation
+identity becomes `local:<username>` — so re-check any RoleBindings you bound to the `sub`.
 
 ## Bootstrap
 

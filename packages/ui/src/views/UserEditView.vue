@@ -9,6 +9,7 @@ import PermissionsEditor from '../components/PermissionsEditor.vue';
 interface AppUser {
   id: string;
   username?: string;
+  hasLocalAccount: boolean;
   sub?: string;
   email?: string;
   displayName?: string;
@@ -55,7 +56,9 @@ onMounted(async () => {
       return;
     }
     label.value = user.username ?? user.email ?? user.id;
-    form.isPromotion = !user.username;
+    // An SSO-only identity carries an auto-derived username too, so its presence no longer means
+    // there's a local account behind this row — ask the API which it is.
+    form.isPromotion = !user.hasLocalAccount;
     form.username = user.username ?? '';
     form.email = user.email ?? '';
     form.displayName = user.displayName ?? '';
@@ -103,6 +106,10 @@ async function save() {
     <el-form label-width="140px" style="max-width: 600px">
       <el-form-item v-if="form.isPromotion" label="Username">
         <el-input v-model="form.username" placeholder="required to give this SSO identity a local account" />
+        <span style="color: var(--el-text-color-secondary); font-size: 12px">
+          Derived from this identity's SSO claims — saving with a username set creates a local
+          account it can be given a password for.
+        </span>
       </el-form-item>
       <el-form-item v-else label="Username">
         <el-input :model-value="form.username" disabled />
