@@ -151,8 +151,26 @@ export interface VerifiedIdentity {
    * user set an arbitrary/unverified email on their own profile, which would otherwise let an
    * attacker link to (and inherit the role/groups of) any local account by guessing its email. */
   emailVerified: boolean;
+  /** The IdP's `preferred_username` claim (carried by the "profile" scope), when present — the
+   * best available source for the username an auto-created identity gets on first login (see
+   * auth/user-store.ts's `deriveOidcUsername`). */
+  preferredUsername?: string;
   groups: string[];
   claims: Record<string, unknown>;
+}
+
+/** `email_verified` is a boolean in OIDC core, but enough IdPs (and SAML-to-OIDC bridges) emit it
+ * as the *string* `"true"` that a strict `=== true` test silently disables email-based account
+ * linking for those tokens — which surfaces as a duplicate auto-created identity sitting next to
+ * the local account the login should have linked to. Accept both spellings and nothing else: any
+ * other value (including a missing claim) still counts as unverified, since the security property
+ * linking depends on is an IdP *assertion*, not the absence of a denial. */
+function claimIsTrue(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 export async function verifyIdToken(
@@ -176,7 +194,8 @@ export async function verifyIdToken(
   return {
     sub: payload.sub as string,
     email: payload.email as string | undefined,
-    emailVerified: payload.email_verified === true,
+    emailVerified: claimIsTrue(payload.email_verified),
+    preferredUsername: nonEmptyString(payload.preferred_username),
     groups,
     claims: payload as Record<string, unknown>,
   };

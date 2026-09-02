@@ -166,7 +166,12 @@ export function registerAuthRoutes(app: AnyElysia): AnyElysia {
             // registry (see auth/roles.ts) so it shows up for an admin to promote from the default
             // `role: none`. Keeps email/displayName fresh on every login without ever touching an
             // already-assigned role.
-            await trackOidcLogin(verified.sub, verified.email, displayName);
+            await trackOidcLogin(
+              verified.sub,
+              verified.email,
+              displayName,
+              verified.preferredUsername,
+            );
             session = {
               identity: { impersonateUser: verified.sub, impersonateGroups: verified.groups },
               displayName,

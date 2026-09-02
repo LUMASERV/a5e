@@ -4,6 +4,7 @@ import { Elysia } from 'elysia';
 import { bootstrapAdminAccount } from './auth/bootstrap';
 import { migrateLegacyUsersIfNeeded } from './auth/migrate-legacy-users';
 import { registerAuthRoutes } from './auth/routes';
+import { pruneSupersededOidcIdentities } from './auth/user-store';
 import type { AnyElysia } from './lib/elysia-types';
 import { registerAncillaryRoutes } from './modules/ancillary';
 import { registerAnsibleJobRoutes } from './modules/ansiblejobs';
@@ -22,6 +23,15 @@ import { registerUsersSettingsRoutes } from './modules/users-settings';
 // alongside them, instead of the legacy accounts being carried over as-is.
 await migrateLegacyUsersIfNeeded();
 await bootstrapAdminAccount();
+// After both, so it sees the finished user set — and after bootstrap in particular, since pruning
+// must never be what makes the account store look empty. Failing this is not worth refusing to
+// serve over: it only tidies up already-inert duplicate rows.
+await pruneSupersededOidcIdentities().catch((err) => {
+  // Log the error itself, not just its message — whatever went wrong here (RBAC on the User CRD,
+  // a transient API error) is diagnosed from the stack and any structured fields the k8s client
+  // attaches, and this is the only trace of it.
+  console.warn('could not prune duplicate SSO identity records:', err);
+});
 
 let app: AnyElysia = new Elysia()
   // `credentials: true` is for the one remaining cookie (oidc_state, auth/routes.ts's CSRF
