@@ -3,13 +3,13 @@ import type { AnsibleHostSpec, Permission } from '@a5e/schemas';
 import { canAct } from './permission-engine';
 
 /**
- * Kinds whose spec can name an arbitrary `v1/Secret` and have the operator dereference it —
- * today only `varsBySecret` on the two host kinds (see hosts.ts). Every other Secret reference in
- * the schema points at a Secret through a CRD the permission engine already gates on its own
+ * Kinds whose spec can name an arbitrary `v1/Secret` and have the operator dereference it — today
+ * only `varsBySecretRef` on the two host kinds (see hosts.ts). Every other Secret reference in the
+ * schema points at a Secret through a CRD the permission engine already gates on its own
  * (`AnsibleSSHKey.spec.secretRef`, `AnsiblePlaybook.spec.source.git.*SecretRef`), so `use` grants
  * are deliberately not required for those.
  */
-const KINDS_WITH_VARS_BY_SECRET = new Set(['AnsibleHost', 'ClusterAnsibleHost']);
+const KINDS_WITH_VARS_BY_SECRET_REF = new Set(['AnsibleHost', 'ClusterAnsibleHost']);
 
 export interface SecretUseDenial {
   name: string;
@@ -21,7 +21,7 @@ export interface SecretUseDenial {
  * Enforces a `use` grant on the built-in `Secret` permission type (permissions.ts) for every
  * Secret an incoming AnsibleHost/ClusterAnsibleHost body would have the operator read.
  *
- * This is the *only* gate on that read: the operator resolves `varsBySecret` with its own
+ * This is the *only* gate on that read: the operator resolves `varsBySecretRef` with its own
  * cluster-wide-privileged identity, never the requesting user's, so without this check any user
  * who can create a host could name any Secret its namespace rule allows and have its contents
  * rendered into a run. `resolveRefNamespace` supplies that namespace rule here exactly as it does
@@ -46,14 +46,14 @@ export function deniedSecretUse(
   ownerNamespace: string | undefined,
   body: unknown,
 ): SecretUseDenial | undefined {
-  if (!KINDS_WITH_VARS_BY_SECRET.has(kind)) return undefined;
-  const entries = (body as { spec?: Pick<AnsibleHostSpec, 'varsBySecret'> } | undefined)?.spec
-    ?.varsBySecret;
+  if (!KINDS_WITH_VARS_BY_SECRET_REF.has(kind)) return undefined;
+  const entries = (body as { spec?: Pick<AnsibleHostSpec, 'varsBySecretRef'> } | undefined)?.spec
+    ?.varsBySecretRef;
   if (!Array.isArray(entries)) return undefined;
 
   for (const entry of entries) {
     if (!entry?.name) {
-      return { name: String(entry?.name ?? ''), message: 'varsBySecret entry needs a "name"' };
+      return { name: String(entry?.name ?? ''), message: 'varsBySecretRef entry needs a "name"' };
     }
     let namespace: string | undefined;
     try {
@@ -64,7 +64,7 @@ export function deniedSecretUse(
     if (!namespace) {
       return {
         name: entry.name,
-        message: `varsBySecret entry "${entry.name}" needs a namespace (${kind} is cluster-scoped)`,
+        message: `varsBySecretRef entry "${entry.name}" needs a namespace (${kind} is cluster-scoped)`,
       };
     }
     if (!canAct(perms, { type: 'Secret', namespace }, 'use')) {

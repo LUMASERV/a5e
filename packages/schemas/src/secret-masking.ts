@@ -2,7 +2,7 @@
  * The one place a value read out of a `v1/Secret` is turned into something safe to hand a
  * client. Used by every client-facing rendering of secret-sourced data — today the resolved
  * inventory download (api/modules/inventory-download.ts), which shows *which* host vars a
- * `varsBySecret` entry contributes (hosts.ts) without ever revealing what they hold.
+ * `varsBySecretRef` entry contributes (hosts.ts) without ever revealing what they hold.
  *
  * The operator deliberately does NOT mask: an `ansible-playbook` run needs the real values, and
  * it keeps them out of reach by rendering the inventory into a run-owned Secret rather than a

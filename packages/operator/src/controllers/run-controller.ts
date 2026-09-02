@@ -169,7 +169,7 @@ async function resolveHostSshKeys(
 }
 
 /**
- * Copies each *distinct* Secret referenced by some host's `varsBySecret` into one run-owned
+ * Copies each *distinct* Secret referenced by some host's `varsBySecretRef` into one run-owned
  * Secret in the Run's namespace, deduplicated so hosts sharing a Secret don't get redundant
  * copies/volumes. Mutates each `ResolvedVarsSecret` in place, setting `mountName` to the mount
  * the rendered inventory's `lookup('file', ...)` expressions will read from.

@@ -103,7 +103,7 @@ spec:
                 vars:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-                varsBySecret:
+                varsBySecretRef:
                   type: array
                   items:
                     type: object

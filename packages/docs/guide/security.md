@@ -32,11 +32,11 @@ otherwise read another namespace's Secrets by pointing a ref at them.
   independent origins. See [Authentication](/guide/authentication#sessions-are-a-bearer-token-not-a-cookie)
   for the trade-off this makes and why it's acceptable given the RBAC model above.
 - **The operator's ServiceAccount can read any Secret in the cluster** — it needs to, to
-  reconcile `AnsibleSSHKey`/git-auth/[`varsBySecret`](/guide/crds#host-vars-from-a-secret)
+  reconcile `AnsibleSSHKey`/git-auth/[`varsBySecretRef`](/guide/crds#host-vars-from-a-secret)
   references that can live in any namespace. This is a documented, accepted trade-off (see
   `crds/rbac/operator.yaml`'s own comments), not an oversight. The API's own ServiceAccount also
   holds cluster-wide `get` on Secrets, for the single path that needs it: listing which host vars
-  a `varsBySecret` entry contributes for the resolved-inventory download, where every value is
+  a `varsBySecretRef` entry contributes for the resolved-inventory download, where every value is
   masked before it leaves the process.
 - **Pointing a host at a Secret is its own permission** — the `use` action on the built-in
   `Secret` type, namespace-scoped. Without it, anyone who could create an `AnsibleHost` could have

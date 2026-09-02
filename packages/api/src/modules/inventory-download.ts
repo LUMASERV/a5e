@@ -22,7 +22,7 @@ function hopToSshTarget(hop: JumpChainHop): string {
 
 /**
  * Reads a Secret as the API's own identity, for the sole purpose of listing which host vars a
- * `varsBySecret` entry contributes — every value it returns is masked before it reaches the
+ * `varsBySecretRef` entry contributes — every value it returns is masked before it reaches the
  * response body (see `maskSecretValues` below).
  */
 const secretReader: SecretReader = {
@@ -36,7 +36,7 @@ const secretReader: SecretReader = {
  * (those get an INI rendering via renderInventoryIni, plus a per-host SSH key mount path that
  * only means anything inside a Job's Pod, deliberately omitted here).
  *
- * Secret-sourced host vars (`AnsibleHost.spec.varsBySecret`) appear here by name with their
+ * Secret-sourced host vars (`AnsibleHost.spec.varsBySecretRef`) appear here by name with their
  * values MASKED — the download is a human-readable view of what the inventory resolves to, not a
  * credential export, and `download` is a far weaker grant than `use` on the Secrets themselves.
  * A downloaded file therefore needs those vars supplied another way before it will actually run.

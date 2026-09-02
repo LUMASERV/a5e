@@ -7,7 +7,7 @@ import { useRouter } from 'vue-router';
 import JumpHostEditor from '../../components/JumpHostEditor.vue';
 import LabelsEditor from '../../components/LabelsEditor.vue';
 import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
-import VarsBySecretEditor from '../../components/VarsBySecretEditor.vue';
+import VarsBySecretRefEditor from '../../components/VarsBySecretRefEditor.vue';
 import VarsEditor from '../../components/VarsEditor.vue';
 import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useNamespaceStore } from '../../stores/namespace';
@@ -107,7 +107,7 @@ async function save() {
         <JumpHostEditor v-model="form.spec.jumpHost" :namespace="formNamespace" parent-scope="namespaced" />
       </el-form-item>
       <el-form-item label="Vars from secrets">
-        <VarsBySecretEditor v-model="form.spec.varsBySecret" :namespace-required="false" />
+        <VarsBySecretRefEditor v-model="form.spec.varsBySecretRef" :namespace-required="false" />
       </el-form-item>
       <el-form-item label="Vars (YAML)">
         <VarsEditor v-model="form.spec.vars" />

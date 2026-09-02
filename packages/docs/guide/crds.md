@@ -38,7 +38,7 @@ metadata:
 spec:
   ansibleAddress: 10.0.0.11
   sshKeyRef: { kind: AnsibleSSHKey, name: team-a-key }
-  varsBySecret:
+  varsBySecretRef:
     - name: db-01-credentials     # namespace optional — defaults to the host's own
   vars:
     role: primary
@@ -54,7 +54,7 @@ must be the host's own namespace (the [scoping rule](#namespace-scoping-rules) a
 
 Three things follow from these values being real secrets:
 
-- **Referencing a Secret needs its own permission.** The operator dereferences `varsBySecret` with
+- **Referencing a Secret needs its own permission.** The operator dereferences `varsBySecretRef` with
   its own cluster-wide-privileged identity, so the API gates *who may point a host at a Secret*:
   the `use` action on the built-in `Secret` permission type, scoped by namespace (see
   [Authentication](/guide/authentication)). Approving a change request that adds one is checked

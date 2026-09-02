@@ -18,7 +18,7 @@ const EXCLUDED_PERMISSION_TYPES = new Set(['Group', 'User']);
  * Kinds a permission can target that are NOT one of this project's CRDs, so they can't come from
  * RESOURCE_DESCRIPTORS. `Secret` is the built-in `v1/Secret`, and the only action it ever carries
  * is `use` — a5e never lists, reads back or writes a user's Secrets on their behalf, it only
- * *dereferences* one a spec names (`AnsibleHost.spec.varsBySecret`, see hosts.ts), which is
+ * *dereferences* one a spec names (`AnsibleHost.spec.varsBySecretRef`, see hosts.ts), which is
  * exactly the operation this gates.
  */
 export const BUILTIN_PERMISSION_TYPES = ['Secret'] as const;
@@ -43,7 +43,7 @@ export const PERMISSION_ACTIONS = [
   'retry', // AnsibleRun retry (modules/ansibleruns.ts) — 'get' also covers viewing/downloading logs
   'download', // AnsibleInventory/ClusterAnsibleInventory resolved-YAML export
   'import', // AnsibleSSHKey/ClusterAnsibleSSHKey generate/upload convenience routes
-  'use', // v1/Secret dereferenced by AnsibleHost/ClusterAnsibleHost `varsBySecret`
+  'use', // v1/Secret dereferenced by AnsibleHost/ClusterAnsibleHost `varsBySecretRef`
   // (auth/secret-use.ts) — the only action the built-in `Secret` type takes
   'approve', // ChangeRequest approve AND decline — one action covers both
   'propose', // reserved: proposing a ChangeRequest is currently ungated for any logged-in user;

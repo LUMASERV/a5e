@@ -65,7 +65,7 @@ export function renderInventoryIni(
           `ansible_ssh_common_args=${JSON.stringify(`-o StrictHostKeyChecking=accept-new -J ${proxyJump}`)}`,
         );
       }
-      // Secret-sourced vars first (in spec order, so a later `varsBySecret` entry overrides an
+      // Secret-sourced vars first (in spec order, so a later `varsBySecretRef` entry overrides an
       // earlier one), then inline `spec.vars` last — an explicit inline var always beats a
       // Secret-sourced one of the same name (hosts.ts). `Object.entries` on the merged record
       // keeps first-insertion order, so an overridden key stays where it first appeared while

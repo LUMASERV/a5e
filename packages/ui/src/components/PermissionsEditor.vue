@@ -29,7 +29,7 @@ const TYPE_SPECIFIC_ACTIONS: Record<string, readonly string[]> = {
 };
 /** `Secret` is the built-in v1/Secret (BUILTIN_PERMISSION_TYPES), not one of this project's CRDs:
  * a5e never lists, reads back or writes a user's Secrets, so none of the CRUD verbs above apply —
- * the only thing it does is dereference one a host's `varsBySecret` names, which is `use`. */
+ * the only thing it does is dereference one a host's `varsBySecretRef` names, which is `use`. */
 const EXACT_ACTIONS: Record<string, readonly string[]> = { Secret: ['use'] };
 const ALL_REAL_ACTIONS = PERMISSION_ACTIONS.filter((a) => a !== 'propose');
 

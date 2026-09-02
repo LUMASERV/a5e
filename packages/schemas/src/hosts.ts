@@ -34,11 +34,11 @@ export const JUMP_HOST_CEL_MESSAGE =
  * No `key` field on purpose: every key in the Secret becomes a var named after that key, so
  * adding a var is a Secret edit rather than a host edit.
  */
-export const varsBySecretEntrySchema = z.object({
+export const varsBySecretRefSchema = z.object({
   name: z.string(),
   namespace: z.string().optional(),
 });
-export type VarsBySecretEntry = z.infer<typeof varsBySecretEntrySchema>;
+export type VarsBySecretRef = z.infer<typeof varsBySecretRefSchema>;
 
 // Hosts are always reached over SSH — there is no `connection` field (no local/winrm support).
 // The SSH key lives on the host, not the run: different hosts commonly need different keys, and
@@ -61,7 +61,7 @@ export const ansibleHostSpecSchema = z.object({
    * inventory-render.ts's `secretVarLookup`), and every client-facing rendering masks the value
    * (secret-masking.ts).
    */
-  varsBySecret: z.array(varsBySecretEntrySchema).optional(),
+  varsBySecretRef: z.array(varsBySecretRefSchema).optional(),
   // Disabled hosts are excluded from inventory resolution (resolveInventoryGroups) entirely —
   // a quick way to pull a host out of every inventory/run without deleting or un-labeling it.
   enabled: z.boolean().default(true),
@@ -71,12 +71,13 @@ export type AnsibleHostSpec = z.infer<typeof ansibleHostSpecSchema>;
 export const ansibleHostStatusSchema = z.object(commonStatusFields);
 export type AnsibleHostStatus = z.infer<typeof ansibleHostStatusSchema>;
 
-// ClusterAnsibleHost: same shape, except `varsBySecret[].namespace` is REQUIRED — a cluster-scoped
-// object has no owning namespace to default to (same rule as ClusterAnsibleSSHKey's secretRef).
+// ClusterAnsibleHost: same shape, except `varsBySecretRef[].namespace` is REQUIRED — a
+// cluster-scoped object has no owning namespace to default to (same rule as
+// ClusterAnsibleSSHKey's secretRef).
 // The result is a narrowing of AnsibleHostSpec, so anything typed against that keeps accepting a
 // ClusterAnsibleHost's spec.
 export const clusterAnsibleHostSpecSchema = ansibleHostSpecSchema.extend({
-  varsBySecret: z.array(varsBySecretEntrySchema.extend({ namespace: z.string() })).optional(),
+  varsBySecretRef: z.array(varsBySecretRefSchema.extend({ namespace: z.string() })).optional(),
 });
 export type ClusterAnsibleHostSpec = z.infer<typeof clusterAnsibleHostSpecSchema>;
 

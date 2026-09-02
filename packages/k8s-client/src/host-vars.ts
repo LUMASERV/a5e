@@ -2,15 +2,15 @@ import type { AnsibleHostSpec } from '@a5e/schemas';
 import { resolveRefNamespace } from './ref-namespace';
 
 /**
- * The one Secret-reading capability `resolveVarsBySecret` needs, so this module stays free of any
- * particular core-API wrapper. The operator's `CoreResources` (operator/src/k8s/core.ts) already
- * satisfies it structurally; the API passes a thin adapter over its own `coreApi`.
+ * The one Secret-reading capability `resolveVarsBySecretRefs` needs, so this module stays free of
+ * any particular core-API wrapper. The operator's `CoreResources` (operator/src/k8s/core.ts)
+ * already satisfies it structurally; the API passes a thin adapter over its own `coreApi`.
  */
 export interface SecretReader {
   getSecret(namespace: string, name: string): Promise<{ data?: Record<string, string> }>;
 }
 
-/** One resolved `varsBySecret` entry — kept as its own object rather than pre-flattened so the
+/** One resolved `varsBySecretRef` entry — kept as its own object rather than pre-flattened so the
  * operator can mount each Secret separately and the API can mask each one's values. */
 export interface ResolvedVarsSecret {
   namespace: string;
@@ -50,7 +50,7 @@ interface HostVarsSource {
   name: string;
   /** `undefined` for a ClusterAnsibleHost — see resolveRefNamespace. */
   namespace?: string;
-  spec: Pick<AnsibleHostSpec, 'varsBySecret'>;
+  spec: Pick<AnsibleHostSpec, 'varsBySecretRef'>;
 }
 
 function describe(host: HostVarsSource): string {
@@ -58,7 +58,7 @@ function describe(host: HostVarsSource): string {
 }
 
 /**
- * Dereferences a host's `spec.varsBySecret` (hosts.ts), one entry per referenced `v1/Secret`, in
+ * Dereferences a host's `spec.varsBySecretRef` (hosts.ts), one entry per referenced `v1/Secret`, in
  * spec order — so a caller flattening them (`mergeSecretVars`) gets "a later entry overrides an
  * earlier one" for free.
  *
@@ -68,11 +68,11 @@ function describe(host: HostVarsSource): string {
  * cluster-wide-privileged identity, so skipping that check would reopen the cross-tenant Secret
  * exfiltration path ref-namespace.ts's doc comment describes.
  */
-export async function resolveVarsBySecret(
+export async function resolveVarsBySecretRefs(
   secrets: SecretReader,
   host: HostVarsSource,
 ): Promise<ResolvedVarsSecret[]> {
-  const entries = host.spec.varsBySecret;
+  const entries = host.spec.varsBySecretRef;
   if (!entries?.length) return [];
 
   const resolved: ResolvedVarsSecret[] = [];
@@ -82,13 +82,13 @@ export async function resolveVarsBySecret(
       namespace = resolveRefNamespace('Namespaced', entry.namespace, host.namespace);
     } catch (err) {
       throw new HostVarsResolveError(
-        `${describe(host)}: varsBySecret entry "${entry.name}": ${(err as Error).message}`,
+        `${describe(host)}: varsBySecretRef entry "${entry.name}": ${(err as Error).message}`,
         403,
       );
     }
     if (!namespace) {
       throw new HostVarsResolveError(
-        `${describe(host)}: varsBySecret entry "${entry.name}" needs a namespace (this host is cluster-scoped)`,
+        `${describe(host)}: varsBySecretRef entry "${entry.name}" needs a namespace (this host is cluster-scoped)`,
         400,
       );
     }

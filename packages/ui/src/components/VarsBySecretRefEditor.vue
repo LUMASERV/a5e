@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import type { VarsBySecretEntry } from '@a5e/schemas';
+import type { VarsBySecretRef } from '@a5e/schemas';
 
 const props = defineProps<{
-  modelValue: VarsBySecretEntry[] | undefined;
+  modelValue: VarsBySecretRef[] | undefined;
   /** True for a cluster-scoped ClusterAnsibleHost, where every entry MUST name a namespace (there
    * is no owning one to default to). A namespaced AnsibleHost may only ever use its own, so the
    * field is hidden entirely rather than offered and then rejected server-side. */
   namespaceRequired: boolean;
 }>();
-const emit = defineEmits<{ 'update:modelValue': [VarsBySecretEntry[] | undefined] }>();
+const emit = defineEmits<{ 'update:modelValue': [VarsBySecretRef[] | undefined] }>();
 
-function update(entries: VarsBySecretEntry[]) {
+function update(entries: VarsBySecretRef[]) {
   emit('update:modelValue', entries.length ? entries : undefined);
 }
 
@@ -22,7 +22,7 @@ function removeEntry(index: number) {
   update((props.modelValue ?? []).filter((_, i) => i !== index));
 }
 
-function patchEntry(index: number, patch: Partial<VarsBySecretEntry>) {
+function patchEntry(index: number, patch: Partial<VarsBySecretRef>) {
   update((props.modelValue ?? []).map((e, i) => (i === index ? { ...e, ...patch } : e)));
 }
 </script>

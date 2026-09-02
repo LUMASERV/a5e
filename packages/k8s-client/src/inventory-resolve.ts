@@ -1,7 +1,7 @@
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleHostSpec, AnsibleInventorySpec, CustomResource } from '@a5e/schemas';
 import type { CallerIdentity, CustomResourceClient } from './customResourceClient';
-import { type ResolvedVarsSecret, type SecretReader, resolveVarsBySecret } from './host-vars';
+import { type ResolvedVarsSecret, type SecretReader, resolveVarsBySecretRefs } from './host-vars';
 import { labelSelectorToString } from './label-selector';
 import { resolveRefNamespace } from './ref-namespace';
 
@@ -22,7 +22,7 @@ export interface ResolvedHost {
   sshKeyMountName?: string;
   /**
    * Populated by `resolveInventoryGroups` only when it was given a `secretReader` — one entry per
-   * `spec.varsBySecret` reference, in spec order. The vars they contribute sit underneath
+   * `spec.varsBySecretRef` reference, in spec order. The vars they contribute sit underneath
    * `spec.vars` (an explicit inline var of the same name wins).
    */
   varsSecrets?: ResolvedVarsSecret[];
@@ -103,7 +103,7 @@ export interface ResolveInventoryOptions {
    * chains for rendering; the inventory controller's status-only host-count reconcile leaves
    * this off to avoid the extra lookups. */
   resolveJumpChains?: boolean;
-  /** Set by the same two callers to also dereference each host's `spec.varsBySecret` into
+  /** Set by the same two callers to also dereference each host's `spec.varsBySecretRef` into
    * `ResolvedHost.varsSecrets`; left off wherever only host membership matters, so a host-count
    * reconcile never reads a Secret at all. */
   secretReader?: SecretReader;
@@ -171,8 +171,8 @@ export async function resolveInventoryGroups(
         if (options.resolveJumpChains && hostObj.spec.jumpHost) {
           resolved.jumpChain = await resolveJumpChain(client, identity, resolved);
         }
-        if (options.secretReader && hostObj.spec.varsBySecret?.length) {
-          resolved.varsSecrets = await resolveVarsBySecret(options.secretReader, resolved);
+        if (options.secretReader && hostObj.spec.varsBySecretRef?.length) {
+          resolved.varsSecrets = await resolveVarsBySecretRefs(options.secretReader, resolved);
         }
         hosts.push(resolved);
       }

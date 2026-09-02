@@ -136,7 +136,7 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      // The approver's `approve` grant per item, plus — for a host item carrying `varsBySecret` —
+      // The approver's `approve` grant per item, plus — for a host item carrying `varsBySecretRef` —
       // a `use` grant on every Secret it names. Approving is the moment the change becomes real,
       // so it's the approver who must be allowed to hand the operator those Secrets, exactly as
       // the direct write path checks the writer (auth/secret-use.ts).

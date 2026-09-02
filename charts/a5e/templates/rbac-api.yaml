@@ -69,7 +69,7 @@ rules:
   # identity, cluster-wide since a ClusterAnsibleSSHKey's target namespace can be any namespace.
   #
   # `get` is for one narrow read: the resolved-inventory download (modules/inventory-download.ts)
-  # dereferences each host's `spec.varsBySecret` to list WHICH vars a Secret contributes, and
+  # dereferences each host's `spec.varsBySecretRef` to list WHICH vars a Secret contributes, and
   # every value is masked before it reaches the response (@a5e/schemas' secret-masking.ts) — the
   # API never returns a Secret's contents in the clear, and never reads one outside that path.
   # RBAC can't scope `get` to only the dynamically-named Secrets a spec happens to reference, so
