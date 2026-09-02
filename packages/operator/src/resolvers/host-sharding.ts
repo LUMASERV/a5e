@@ -1,73 +1,85 @@
-import type { ResolvedGroup, ResolvedHost } from '@a5e/k8s-client';
+import type { ResolvedGroup } from '@a5e/k8s-client';
 
-/** A run's inventory split into one shard per Job/pod a `parallel`-enabled AnsibleRun spawns. */
+/**
+ * One shard of a `parallel`-enabled AnsibleRun: a subset of the resolved inventory's hosts that
+ * gets its own Job/pod. Per code review (see PR #4): a shard does NOT get its own partial
+ * inventory rendered — that broke plays that rely on the *whole* inventory still being visible
+ * even while only running against some of it (`hostvars[<host outside this shard>]`,
+ * `groups['x']` membership counts, `run_once`, `serial`, `delegate_to`, etc. all read the full
+ * rendered inventory, not just the current play's targets). Every shard's pod mounts the SAME
+ * full inventory ConfigMap (run-controller.ts's `prepareRunResources`) and is scoped to its hosts
+ * purely via `ansible-playbook --limit` — exactly the mechanism Ansible itself provides for "run
+ * this playbook against only some hosts of a larger inventory".
+ */
 export interface HostShard {
   /** 0-based, stable for the lifetime of the run (order is derived from `groups`, deterministic). */
   index: number;
-  /** This shard's slice of the inventory, re-grouped exactly like `groups` (same names/vars/
-   * children) but containing only the hosts assigned to it — a group with none of its hosts in
-   * this shard is dropped entirely so the rendered inventory.ini doesn't declare empty groups. */
-  groups: ResolvedGroup[];
-  /** `AnsibleHost`/`ClusterAnsibleHost` names in this shard, in the order they'll appear in the
-   * rendered inventory — for `status.shards[].hosts` observability only. */
+  /** `AnsibleHost`/`ClusterAnsibleHost` names in this shard — for `status.shards[].hosts`
+   * observability, and for re-deriving `limit` later (see `limitForHostNames`) if this shard is
+   * only started after a later reconcile re-resolves the inventory. */
   hostNames: string[];
+  /** The `--limit` value scoping a shard's pod to just these hosts: the *inventory* hostnames
+   * (`ansibleHost ?? name` — can differ from `hostNames` above) joined with `:`, matching how
+   * `renderInventoryIni` actually keys each host in the rendered inventory.ini. Ansible pattern
+   * syntax, so `:` here means "union of these hosts", combinable with a user-supplied
+   * `ansibleOptions.limit` via `:&` (intersection) — see run-controller.ts's `startShardJob`. */
+  limit: string;
+}
+
+function inventoryHostname(host: { name: string; spec: { ansibleHost?: string } }): string {
+  return host.spec.ansibleHost ?? host.name;
 }
 
 /**
- * Splits a resolved inventory into shards of at most `maxAmountOfHosts` hosts each, preserving
- * each host's original group membership (and therefore its group vars) — a shard's inventory.ini
- * is a strict subset of the full inventory's, never a re-flattened "all hosts, one group" one.
- *
- * Flattens group-by-group, host-by-host (`resolveInventoryGroups`'s own order — deterministic
- * given the same AnsibleInventory spec) into chunks of `maxAmountOfHosts`; a host that appears in
- * more than one group (legal — group membership isn't exclusive) is chunked by its *first*
- * occurrence only and carries every group it belongs to along with it, so it still ends up in
- * exactly one shard rather than being split across two pods.
+ * Splits a resolved inventory's hosts into shards of at most `maxAmountOfHosts` each. Flattens
+ * group-by-group, host-by-host (`resolveInventoryGroups`'s own order — deterministic given the
+ * same AnsibleInventory spec); a host that appears in more than one group (legal — group
+ * membership isn't exclusive) is counted once, by its first occurrence, so it ends up in exactly
+ * one shard rather than being double-counted across two.
  */
 export function shardHosts(groups: ResolvedGroup[], maxAmountOfHosts: number): HostShard[] {
-  const groupsByHost = new Map<ResolvedHost, ResolvedGroup[]>();
-  const order: ResolvedHost[] = [];
+  const seen = new Set<string>();
+  const hosts: { name: string; inventoryHostname: string }[] = [];
   for (const group of groups) {
     for (const host of group.hosts) {
-      let hostGroups = groupsByHost.get(host);
-      if (!hostGroups) {
-        hostGroups = [];
-        groupsByHost.set(host, hostGroups);
-        order.push(host);
-      }
-      hostGroups.push(group);
+      const key = `${host.kind}/${host.namespace ?? ''}/${host.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hosts.push({ name: host.name, inventoryHostname: inventoryHostname(host) });
     }
   }
 
   const shards: HostShard[] = [];
-  for (let start = 0; start < order.length; start += maxAmountOfHosts) {
-    const hosts = order.slice(start, start + maxAmountOfHosts);
-    const hostSet = new Set(hosts);
-    const shardGroups: ResolvedGroup[] = groups
-      .filter((group) => group.hosts.some((h) => hostSet.has(h)))
-      .map((group) => ({ ...group, hosts: group.hosts.filter((h) => hostSet.has(h)) }));
+  for (let start = 0; start < hosts.length; start += maxAmountOfHosts) {
+    const chunk = hosts.slice(start, start + maxAmountOfHosts);
     shards.push({
       index: shards.length,
-      groups: shardGroups,
-      hostNames: hosts.map((h) => h.name),
+      hostNames: chunk.map((h) => h.name),
+      limit: chunk.map((h) => h.inventoryHostname).join(':'),
     });
   }
   return shards;
 }
 
 /**
- * Rebuilds the same shard-shaped group slice `shardHosts` would have produced, but keyed by a
- * captured list of host *names* rather than object identity — needed because `groups` here comes
- * from a fresh `resolveInventoryGroups` call (run-controller.ts's `prepareRunResources`, re-run
- * to fill a `Pending` shard slot once concurrency frees up), whose `ResolvedHost` objects share no
- * identity with the ones `shardHosts` originally chunked. If a named host no longer resolves
- * (deleted from the inventory since the run started), it's silently dropped from the shard rather
- * than failing the run — the same "best effort against a moving inventory" trade-off jump chain
- * resolution already accepts elsewhere.
+ * Re-derives a shard's `--limit` value from a freshly re-resolved `groups` and a previously
+ * captured `hostNames` list — used when `pollParallelRun` starts a `Pending` shard only after a
+ * later `prepareRunResources` call, whose `ResolvedHost` objects share no identity with the ones
+ * `shardHosts` originally chunked. A named host that no longer resolves (deleted from the
+ * inventory since the run started) is silently dropped rather than failing the run — the same
+ * "best effort against a moving inventory" trade-off jump chain resolution already accepts
+ * elsewhere.
  */
-export function groupsForHostNames(groups: ResolvedGroup[], hostNames: string[]): ResolvedGroup[] {
+export function limitForHostNames(groups: ResolvedGroup[], hostNames: string[]): string {
   const nameSet = new Set(hostNames);
-  return groups
-    .filter((group) => group.hosts.some((h) => nameSet.has(h.name)))
-    .map((group) => ({ ...group, hosts: group.hosts.filter((h) => nameSet.has(h.name)) }));
+  const seen = new Set<string>();
+  const limits: string[] = [];
+  for (const group of groups) {
+    for (const host of group.hosts) {
+      if (!nameSet.has(host.name) || seen.has(host.name)) continue;
+      seen.add(host.name);
+      limits.push(inventoryHostname(host));
+    }
+  }
+  return limits.join(':');
 }

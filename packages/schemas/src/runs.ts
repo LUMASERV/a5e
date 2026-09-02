@@ -19,12 +19,16 @@ export const resourceRequirementsSchema = z.object({
 export type ResourceRequirements = z.infer<typeof resourceRequirementsSchema>;
 
 /**
- * Splits one AnsibleRun's inventory across multiple Jobs/pods instead of a single pod running
- * `ansible-playbook` against every host. Each shard's pod is handed an inventory scoped to at
- * most `maxAmountOfHosts` hosts; the controller creates shard Jobs incrementally so at most
- * `maxConcurrentRuns` are ever in flight at once for this run (run-controller.ts's
+ * Splits one AnsibleRun's execution across multiple Jobs/pods instead of a single pod running
+ * `ansible-playbook` against every host. Every shard's pod is handed the SAME full inventory
+ * (never a partial one — a play that reads `hostvars[<host outside this shard>]`, checks
+ * `groups['x']` membership, or uses `run_once`/`serial`/`delegate_to` needs the rest of the
+ * inventory to still be visible even though only some hosts are being acted on) and is scoped to
+ * at most `maxAmountOfHosts` of those hosts purely via `ansible-playbook --limit` — the mechanism
+ * Ansible itself provides for exactly this. The controller creates shard Jobs incrementally so at
+ * most `maxConcurrentRuns` are ever in flight at once for this run (run-controller.ts's
  * startParallelRun/pollParallelRun) — never "spawn everything and let Kubernetes throttle it",
- * since a plain Job's `parallelism` field can't give each pod a different inventory.
+ * since a plain Job's `parallelism` field can't give each pod its own `--limit`.
  */
 export const parallelConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -82,11 +86,13 @@ export const failedStepSchema = z.enum(FAILED_STEPS);
 export type FailedStep = z.infer<typeof failedStepSchema>;
 
 /**
- * One shard of a `parallel`-enabled run: its own Job/pod, its own host subset, its own
- * phase/exit code/logs — everything pollRun already tracks at the top level, mirrored per shard
- * since a parallel run has no single Job to poll. `hosts` is for observability only (rendered in
- * the UI/`kubectl describe`); the actual inventory each shard's pod uses lives in its own
- * ConfigMap, not here.
+ * One shard of a `parallel`-enabled run: its own Job/pod, its own `--limit`-scoped host subset,
+ * its own phase/exit code/logs — everything pollRun already tracks at the top level, mirrored per
+ * shard since a parallel run has no single Job to poll. `hosts` is for observability only
+ * (rendered in the UI/`kubectl describe`) — every shard's pod mounts the SAME full inventory
+ * ConfigMap (`status.resolvedInventoryConfigMapRef`), scoped down at runtime via `--limit` rather
+ * than by giving each shard its own partial inventory (see `parallelConfigSchema`'s doc comment
+ * for why).
  */
 export const runShardStatusSchema = z.object({
   index: z.number().int().nonnegative(),

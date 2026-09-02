@@ -7,6 +7,7 @@ import {
 import {
   API_GROUP_VERSION,
   type AnsibleInventorySpec,
+  type AnsibleOptions,
   type AnsiblePlaybookSpec,
   type AnsibleRunSpec,
   type AnsibleRunStatus,
@@ -24,7 +25,7 @@ import {
 import type * as k8s from '@kubernetes/client-node';
 import type { CoreResources } from '../k8s/core';
 import type { ReconcileResult } from '../k8s/informer';
-import { type HostShard, groupsForHostNames, shardHosts } from '../resolvers/host-sharding';
+import { type HostShard, limitForHostNames, shardHosts } from '../resolvers/host-sharding';
 import { renderInventoryIni } from '../resolvers/inventory-render';
 import { type JobBuildInput, type SshKeyMount, buildJobSpec } from '../resolvers/job-builder';
 import { resolveRef } from '../resolvers/object-ref';
@@ -171,7 +172,9 @@ interface PreparedRun {
   owner: k8s.V1OwnerReference;
   namePrefix: string;
   groups: ResolvedGroup[];
-  inventoryVars: Record<string, unknown> | undefined;
+  /** ONE inventory ConfigMap for the whole run, containing every resolved host — shared by every
+   * shard's Job, never a per-shard partial one (see host-sharding.ts's doc comment for why). */
+  inventoryConfigMapName: string;
   sshKeyMounts: SshKeyMount[];
   extraVarsConfigMapName: string;
   entryPoint: string;
@@ -222,6 +225,14 @@ async function prepareRunResources(
   if (sshKeyResult.requeue) {
     return { requeue: true }; // controller-ordering dependency — sshkey-controller hasn't derived it yet
   }
+
+  // One shared inventory ConfigMap for the whole run — every shard's pod (for a `parallel` run)
+  // mounts this SAME ConfigMap and is scoped to its own hosts via `--limit` rather than each
+  // getting its own partial inventory (host-sharding.ts's doc comment has the full rationale).
+  const inventoryCm = await core.createOrUpdateConfigMap(namespace, {
+    metadata: { name: `${namePrefix}-inventory`, namespace, ownerReferences: [owner] },
+    data: { 'inventory.ini': renderInventoryIni(inventoryObj.spec.vars, groups) },
+  });
 
   // Extra vars: playbook defaults, then the run's own overrides win.
   const mergedExtraVars = {
@@ -324,7 +335,7 @@ async function prepareRunResources(
     owner,
     namePrefix,
     groups,
-    inventoryVars: inventoryObj.spec.vars,
+    inventoryConfigMapName: inventoryCm.metadata!.name!,
     sshKeyMounts: sshKeyResult.mounts,
     extraVarsConfigMapName: extraVarsCm.metadata!.name!,
     entryPoint,
@@ -336,12 +347,14 @@ async function prepareRunResources(
   };
 }
 
+/** `ansibleOptions` defaults to `prep`'s run-level options; pass an override (e.g. a shard's
+ * `--limit`-merged copy — see `startShardJob`) to use different ones for one Job. */
 function jobBuildInputFor(
   obj: CustomResource<AnsibleRunSpec, AnsibleRunStatus>,
   runnerImage: string,
   prep: PreparedRun,
-  inventoryConfigMapName: string,
   nameSuffix?: string,
+  ansibleOptionsOverride?: AnsibleOptions,
 ): JobBuildInput {
   return {
     runName: obj.metadata.name,
@@ -349,7 +362,7 @@ function jobBuildInputFor(
     namespace: obj.metadata.namespace!,
     runnerImage,
     nameSuffix,
-    inventoryConfigMapName,
+    inventoryConfigMapName: prep.inventoryConfigMapName,
     playbookConfigMapName: prep.playbookConfigMapName,
     gitSource: prep.gitSource,
     playbookPath: prep.playbookPath,
@@ -358,7 +371,7 @@ function jobBuildInputFor(
     requirementsConfigMapName: prep.requirementsConfigMapName,
     extraVarsConfigMapName: prep.extraVarsConfigMapName,
     sshKeyMounts: prep.sshKeyMounts,
-    ansibleOptions: obj.spec.ansibleOptions,
+    ansibleOptions: ansibleOptionsOverride ?? obj.spec.ansibleOptions,
     timeoutSeconds: obj.spec.timeoutSeconds,
     serviceAccountName: obj.spec.serviceAccountName,
     resources: obj.spec.resources as k8s.V1ResourceRequirements | undefined,
@@ -366,11 +379,15 @@ function jobBuildInputFor(
 }
 
 /**
- * Creates one shard's inventory ConfigMap + Job and returns its initial `Running` status. Safe to
- * call again for the same `shard.index` (both writes are upserts — `createJob` in particular
- * falls back to reading the existing Job on a 409), which is exactly what happens when
- * `pollParallelRun` fills a previously-`Pending` slot after `prepareRunResources` re-resolved
- * everything from scratch.
+ * Creates one shard's Job (mounting the run's single shared inventory ConfigMap, scoped to this
+ * shard's hosts via `--limit` — see host-sharding.ts's doc comment) and returns its initial
+ * `Running` status. Safe to call again for the same `shard.index` (`createJob` falls back to
+ * reading the existing Job on a 409), which is exactly what happens when `pollParallelRun` fills
+ * a previously-`Pending` slot after `prepareRunResources` re-resolved everything from scratch.
+ *
+ * A run-level `ansibleOptions.limit` (if the user also set one) is combined with the shard's own
+ * via Ansible's `:&` intersection operator, so a shard never runs outside hosts the user already
+ * restricted to.
  */
 async function startShardJob(
   core: CoreResources,
@@ -380,18 +397,14 @@ async function startShardJob(
   shard: HostShard,
 ): Promise<RunShardStatus> {
   const namespace = obj.metadata.namespace!;
-  const inventoryIni = renderInventoryIni(prep.inventoryVars, shard.groups);
-  const inventoryCm = await core.createOrUpdateConfigMap(namespace, {
-    metadata: {
-      name: `${prep.namePrefix}-inventory-${shard.index}`,
-      namespace,
-      ownerReferences: [prep.owner],
-    },
-    data: { 'inventory.ini': inventoryIni },
-  });
+  const baseLimit = obj.spec.ansibleOptions?.limit;
+  const ansibleOptions: AnsibleOptions = {
+    ...obj.spec.ansibleOptions,
+    limit: baseLimit ? `${baseLimit}:&${shard.limit}` : shard.limit,
+  };
 
   const jobSpec = buildJobSpec(
-    jobBuildInputFor(obj, runnerImage, prep, inventoryCm.metadata!.name!, String(shard.index)),
+    jobBuildInputFor(obj, runnerImage, prep, String(shard.index), ansibleOptions),
   );
   const job = await core.createJob(namespace, jobSpec);
 
@@ -473,21 +486,14 @@ async function startRun(
       return startParallelRun(client, descriptor, core, runnerImage, obj, prep);
     }
 
-    const inventoryCm = await core.createOrUpdateConfigMap(namespace, {
-      metadata: { name: `${prep.namePrefix}-inventory`, namespace, ownerReferences: [prep.owner] },
-      data: { 'inventory.ini': renderInventoryIni(prep.inventoryVars, prep.groups) },
-    });
-
-    const jobSpec = buildJobSpec(
-      jobBuildInputFor(obj, runnerImage, prep, inventoryCm.metadata!.name!),
-    );
+    const jobSpec = buildJobSpec(jobBuildInputFor(obj, runnerImage, prep));
     const job = await core.createJob(namespace, jobSpec);
 
     await patchRunStatus(client, descriptor, obj, {
       phase: 'Running',
       startTime: new Date().toISOString(),
       jobRef: { name: job.metadata!.name! },
-      resolvedInventoryConfigMapRef: { name: inventoryCm.metadata!.name! },
+      resolvedInventoryConfigMapRef: { name: prep.inventoryConfigMapName },
     });
     return { requeueAfterMs: 3000 };
   } catch (err) {
@@ -526,6 +532,7 @@ async function startParallelRun(
       phase: 'Succeeded',
       startTime: new Date().toISOString(),
       completionTime: new Date().toISOString(),
+      resolvedInventoryConfigMapRef: { name: prep.inventoryConfigMapName },
       shards: [],
     });
     return;
@@ -544,6 +551,7 @@ async function startParallelRun(
   await patchRunStatus(client, descriptor, obj, {
     phase: 'Running',
     startTime: new Date().toISOString(),
+    resolvedInventoryConfigMapRef: { name: prep.inventoryConfigMapName },
     shards: shardStatuses,
   });
   return { requeueAfterMs: 3000 };
@@ -795,7 +803,7 @@ async function pollParallelRun(
           const shard: HostShard = {
             index: pendingShard.index,
             hostNames: pendingShard.hosts,
-            groups: groupsForHostNames(prep.groups, pendingShard.hosts),
+            limit: limitForHostNames(prep.groups, pendingShard.hosts),
           };
           updated[i] = await startShardJob(core, runnerImage, obj, prep, shard);
           freeSlots--;
