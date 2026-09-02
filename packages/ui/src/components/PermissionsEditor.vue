@@ -27,12 +27,23 @@ const TYPE_SPECIFIC_ACTIONS: Record<string, readonly string[]> = {
   ClusterAnsibleSSHKey: ['import'],
   ChangeRequest: ['approve'],
 };
+/** `Secret` is the built-in v1/Secret (BUILTIN_PERMISSION_TYPES), not one of this project's CRDs:
+ * a5e never lists, reads back or writes a user's Secrets, so none of the CRUD verbs above apply —
+ * the only thing it does is dereference one a host's `varsBySecretRef` names, which is `use`. */
+const EXACT_ACTIONS: Record<string, readonly string[]> = { Secret: ['use'] };
 const ALL_REAL_ACTIONS = PERMISSION_ACTIONS.filter((a) => a !== 'propose');
 
 function actionOptionsFor(type: string): readonly string[] {
   // A wildcard type could resolve to any kind at check time, so every real action stays selectable.
   if (type === '*') return ALL_REAL_ACTIONS;
-  return [...UNIVERSAL_ACTIONS, ...(TYPE_SPECIFIC_ACTIONS[type] ?? [])];
+  return EXACT_ACTIONS[type] ?? [...UNIVERSAL_ACTIONS, ...(TYPE_SPECIFIC_ACTIONS[type] ?? [])];
+}
+
+/** A `Secret` grant is matched on namespace only — the API deliberately never reads a Secret just
+ * to check its labels (auth/secret-use.ts), so offering a selector here would let an admin set a
+ * restriction that is then silently ignored. */
+function supportsLabelSelector(type: string): boolean {
+  return type !== 'Secret';
 }
 
 function isClusterScoped(type: string): boolean {
@@ -59,6 +70,7 @@ function setType(index: number, type: string) {
   update(index, {
     type: type as Permission['type'],
     namespaces: isClusterScoped(type) ? [] : current.namespaces,
+    labelSelector: supportsLabelSelector(type) ? current.labelSelector : undefined,
     // Drop any action that doesn't apply to the new type (e.g. switching off AnsibleInventory
     // should drop a stray 'download') — '*' ("all actions") always stays valid regardless of type.
     actions: current.actions.includes('*')
@@ -123,10 +135,12 @@ function removePermission(index: number) {
 
           <el-form-item label="Labels">
             <LabelSelectorEditor
+              v-if="supportsLabelSelector(perm.type)"
               :model-value="perm.labelSelector ?? {}"
               :disabled="disabled"
               @update:model-value="(v) => update(index, { labelSelector: Object.keys(v.matchLabels ?? {}).length ? v : undefined })"
             />
+            <span v-else style="color: var(--el-text-color-secondary)">Not applicable — Secret grants are scoped by namespace only</span>
           </el-form-item>
 
           <el-form-item label="Actions">

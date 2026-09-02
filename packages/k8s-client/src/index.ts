@@ -1,6 +1,7 @@
 export * from './bootstrap';
 export * from './crdRegistry';
 export * from './customResourceClient';
+export * from './host-vars';
 export * from './inventory-resolve';
 export * from './label-selector';
 export * from './pod-log';

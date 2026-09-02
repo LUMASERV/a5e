@@ -27,7 +27,12 @@ import type { CoreResources } from '../k8s/core';
 import type { ReconcileResult } from '../k8s/informer';
 import { type HostShard, limitForHostNames, shardHosts } from '../resolvers/host-sharding';
 import { renderInventoryIni } from '../resolvers/inventory-render';
-import { type JobBuildInput, type SshKeyMount, buildJobSpec } from '../resolvers/job-builder';
+import {
+  type HostVarsMount,
+  type JobBuildInput,
+  type SshKeyMount,
+  buildJobSpec,
+} from '../resolvers/job-builder';
 import { resolveRef } from '../resolvers/object-ref';
 import { buildRequirementsYaml } from '../resolvers/requirements-yaml';
 import { type S3Config, uploadRunLog } from '../s3/uploader';
@@ -163,6 +168,57 @@ async function resolveHostSshKeys(
   return { requeue: false, mounts: [...mountByRefKey.values()] };
 }
 
+/**
+ * Copies each *distinct* Secret referenced by some host's `varsBySecretRef` into one run-owned
+ * Secret in the Run's namespace, deduplicated so hosts sharing a Secret don't get redundant
+ * copies/volumes. Mutates each `ResolvedVarsSecret` in place, setting `mountName` to the mount
+ * the rendered inventory's `lookup('file', ...)` expressions will read from.
+ *
+ * Copying is not optional: a Kubernetes Secret volume can only mount a Secret in the SAME
+ * namespace as the Pod, and a host pulled into the run by a ClusterAnsibleInventory can easily
+ * live — with its Secret — in a different namespace than the Run. This is the same copy the SSH
+ * key path above already makes, with the same consequence: the values land in the Run's namespace,
+ * which is why pointing a host at a Secret needs its own `use` grant at the API (see
+ * api/src/auth/secret-use.ts) rather than only namespace-local host-create permission.
+ *
+ * The values themselves are never rendered into the inventory ConfigMap — see
+ * inventory-render.ts's `secretVarLookup` for why that matters beyond secrecy.
+ */
+async function resolveHostVarsSecrets(
+  core: CoreResources,
+  namespace: string,
+  namePrefix: string,
+  owner: k8s.V1OwnerReference,
+  groups: ResolvedGroup[],
+): Promise<HostVarsMount[]> {
+  const mountBySecretKey = new Map<string, HostVarsMount>();
+
+  for (const group of groups) {
+    for (const host of group.hosts) {
+      for (const secret of host.varsSecrets ?? []) {
+        const secretKey = `${secret.namespace}/${secret.name}`;
+        let mount = mountBySecretKey.get(secretKey);
+        if (!mount) {
+          const mountName = `vars${mountBySecretKey.size}`;
+          const copyName = `${namePrefix}-hostvars-${mountName}`;
+          // `secret.data` is the source Secret's own base64 data, carried over from the resolve
+          // step — no second read, and a byte-exact copy even for non-UTF-8 contents.
+          await core.createOrUpdateSecret(namespace, {
+            metadata: { name: copyName, namespace, ownerReferences: [owner] },
+            type: 'Opaque',
+            data: secret.data,
+          });
+          mount = { mountName, secretName: copyName };
+          mountBySecretKey.set(secretKey, mount);
+        }
+        secret.mountName = mount.mountName;
+      }
+    }
+  }
+
+  return [...mountBySecretKey.values()];
+}
+
 /** Everything both the single-Job and shard-Job paths need, resolved once up front. Re-resolving
  * this later (see pollParallelRun) to fill in shard slots as concurrency frees up is deliberately
  * safe to do again: every write here (Secrets, ConfigMaps) is an upsert keyed by a name derived
@@ -176,6 +232,7 @@ interface PreparedRun {
    * shard's Job, never a per-shard partial one (see host-sharding.ts's doc comment for why). */
   inventoryConfigMapName: string;
   sshKeyMounts: SshKeyMount[];
+  hostVarsMounts: HostVarsMount[];
   extraVarsConfigMapName: string;
   entryPoint: string;
   playbookConfigMapName?: string;
@@ -218,13 +275,19 @@ async function prepareRunResources(
     'self',
     inventoryObj.spec,
     inventoryObj.metadata.namespace,
-    true,
+    { resolveJumpChains: true, secretReader: core },
   );
 
   const sshKeyResult = await resolveHostSshKeys(client, core, namespace, namePrefix, owner, groups);
   if (sshKeyResult.requeue) {
     return { requeue: true }; // controller-ordering dependency — sshkey-controller hasn't derived it yet
   }
+
+  // Secret-sourced host vars: each referenced Secret is copied into the Run's namespace and
+  // mounted, so the inventory below can reference the mounted files instead of ever embedding a
+  // value. Must run BEFORE renderInventoryIni — it's what assigns the mount names those
+  // `lookup('file', ...)` expressions point at.
+  const hostVarsMounts = await resolveHostVarsSecrets(core, namespace, namePrefix, owner, groups);
 
   // One shared inventory ConfigMap for the whole run — every shard's pod (for a `parallel` run)
   // mounts this SAME ConfigMap and is scoped to its own hosts via `--limit` rather than each
@@ -337,6 +400,7 @@ async function prepareRunResources(
     groups,
     inventoryConfigMapName: inventoryCm.metadata!.name!,
     sshKeyMounts: sshKeyResult.mounts,
+    hostVarsMounts,
     extraVarsConfigMapName: extraVarsCm.metadata!.name!,
     entryPoint,
     playbookConfigMapName,
@@ -371,6 +435,7 @@ function jobBuildInputFor(
     requirementsConfigMapName: prep.requirementsConfigMapName,
     extraVarsConfigMapName: prep.extraVarsConfigMapName,
     sshKeyMounts: prep.sshKeyMounts,
+    hostVarsMounts: prep.hostVarsMounts,
     ansibleOptions: ansibleOptionsOverride ?? obj.spec.ansibleOptions,
     timeoutSeconds: obj.spec.timeoutSeconds,
     serviceAccountName: obj.spec.serviceAccountName,

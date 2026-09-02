@@ -62,12 +62,19 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   # modules/sshkey-import.ts creates the backing Secret for a generated/uploaded SSH key as this
-  # identity too, cluster-wide since a ClusterAnsibleSSHKey's target namespace can be any
-  # namespace — no broad `get` granted, the API only ever writes a Secret it itself names at
-  # import time, never reads an arbitrary one.
+  # identity, cluster-wide since a ClusterAnsibleSSHKey's target namespace can be any namespace.
+  #
+  # `get` is for one narrow read: the resolved-inventory download (modules/inventory-download.ts)
+  # dereferences each host's `spec.varsBySecretRef` to list WHICH vars a Secret contributes, and
+  # every value is masked before it reaches the response (@a5e/schemas' secret-masking.ts) — the
+  # API never returns a Secret's contents in the clear, and never reads one outside that path.
+  # RBAC can't scope `get` to only the dynamically-named Secrets a spec happens to reference, so
+  # this is cluster-wide by necessity — the same accepted trade-off the operator's ClusterRole
+  # documents, and the reason `use` on the built-in `Secret` permission type (auth/secret-use.ts)
+  # gates who may point a host at a Secret in the first place.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create"]
+    verbs: ["get", "create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
