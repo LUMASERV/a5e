@@ -19,16 +19,18 @@ export interface SshKeyMount {
 }
 
 /**
- * One distinct Secret referenced by at least one host's `varsBySecretRef`, copied into the Run's own
- * namespace and mounted so the inventory's `lookup('file', ...)` expressions can read it (see
- * inventory-render.ts's `secretVarLookup`). Deduplicated by the controller, so hosts sharing a
- * Secret share one copy and one volume — same shape and reasoning as SshKeyMount above.
+ * One distinct Secret or ConfigMap referenced by at least one host's `varsFrom`, copied into the
+ * Run's own namespace and mounted so the inventory's `lookup('file', ...)` expressions can read it
+ * (see inventory-render.ts's `varsFileLookup`). Deduplicated by the controller, so hosts sharing a
+ * source share one copy and one volume — same shape and reasoning as SshKeyMount above.
  */
 export interface HostVarsMount {
-  /** Matches `ResolvedVarsSecret.mountName` / the `/host-vars/<mountName>/<key>` paths the
+  /** Matches `ResolvedVarsSource.mountName` / the `/host-vars/<mountName>/<key>` paths the
    * rendered inventory looks up. */
   mountName: string;
-  secretName: string;
+  /** The run-owned copy's name, and which kind of volume mounts it. */
+  kind: 'Secret' | 'ConfigMap';
+  objectName: string;
 }
 
 export interface JobBuildInput {
@@ -53,7 +55,7 @@ export interface JobBuildInput {
   extraVarsConfigMapName: string;
   /** SSH keys live on hosts, not the run (plan: different hosts commonly need different keys) — one mount per distinct key actually used across the resolved inventory. */
   sshKeyMounts: SshKeyMount[];
-  /** One mount per distinct Secret referenced by some host's `varsBySecretRef` — empty for the
+  /** One mount per distinct Secret/ConfigMap referenced by some host's `varsFrom` — empty for the
    * common case of an inventory whose hosts have none. */
   hostVarsMounts: HostVarsMount[];
   ansibleOptions?: AnsibleOptions;
@@ -116,7 +118,12 @@ export function buildJobSpec(input: JobBuildInput): k8s.V1Job {
   // the entrypoint additionally chmods to 600 because OpenSSH refuses a group-readable key.
   for (const mount of input.hostVarsMounts) {
     const volumeName = `host-vars-${mount.mountName}`;
-    volumes.push({ name: volumeName, secret: { secretName: mount.secretName } });
+    volumes.push({
+      name: volumeName,
+      ...(mount.kind === 'Secret'
+        ? { secret: { secretName: mount.objectName } }
+        : { configMap: { name: mount.objectName } }),
+    });
     mainVolumeMounts.push({
       name: volumeName,
       mountPath: `/host-vars/${mount.mountName}`,

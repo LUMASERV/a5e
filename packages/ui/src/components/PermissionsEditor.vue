@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { PERMISSION_ACTIONS, PERMISSION_TYPES, RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
+import {
+  BUILTIN_PERMISSION_TYPES,
+  PERMISSION_ACTIONS,
+  PERMISSION_TYPES,
+  RESOURCE_DESCRIPTORS_BY_KIND,
+} from '@a5e/schemas';
 import type { Permission } from '@a5e/schemas';
 import { onMounted } from 'vue';
 import { useNamespaceStore } from '../stores/namespace';
@@ -27,10 +32,10 @@ const TYPE_SPECIFIC_ACTIONS: Record<string, readonly string[]> = {
   ClusterAnsibleSSHKey: ['import'],
   ChangeRequest: ['approve'],
 };
-/** `Secret` is the built-in v1/Secret (BUILTIN_PERMISSION_TYPES), not one of this project's CRDs:
- * a5e never lists, reads back or writes a user's Secrets, so none of the CRUD verbs above apply —
- * the only thing it does is dereference one a host's `varsBySecretRef` names, which is `use`. */
-const EXACT_ACTIONS: Record<string, readonly string[]> = { Secret: ['use'] };
+/** The built-in v1 kinds (BUILTIN_PERMISSION_TYPES), not CRDs of this project: a5e never lists,
+ * reads back or writes a user's Secrets/ConfigMaps, so none of the CRUD verbs above apply — the
+ * only thing it does is dereference one a host's `varsFrom` names, which is `use`. */
+const EXACT_ACTIONS: Record<string, readonly string[]> = { Secret: ['use'], ConfigMap: ['use'] };
 const ALL_REAL_ACTIONS = PERMISSION_ACTIONS.filter((a) => a !== 'propose');
 
 function actionOptionsFor(type: string): readonly string[] {
@@ -39,11 +44,11 @@ function actionOptionsFor(type: string): readonly string[] {
   return EXACT_ACTIONS[type] ?? [...UNIVERSAL_ACTIONS, ...(TYPE_SPECIFIC_ACTIONS[type] ?? [])];
 }
 
-/** A `Secret` grant is matched on namespace only — the API deliberately never reads a Secret just
- * to check its labels (auth/secret-use.ts), so offering a selector here would let an admin set a
- * restriction that is then silently ignored. */
+/** A `Secret`/`ConfigMap` grant is matched on namespace only — the API deliberately never reads
+ * the object just to check its labels (auth/vars-from.ts), so offering a selector here would let
+ * an admin set a restriction that is then silently ignored. `permissionSchema` rejects one too. */
 function supportsLabelSelector(type: string): boolean {
-  return type !== 'Secret';
+  return !(BUILTIN_PERMISSION_TYPES as readonly string[]).includes(type);
 }
 
 function isClusterScoped(type: string): boolean {
@@ -140,7 +145,7 @@ function removePermission(index: number) {
               :disabled="disabled"
               @update:model-value="(v) => update(index, { labelSelector: Object.keys(v.matchLabels ?? {}).length ? v : undefined })"
             />
-            <span v-else style="color: var(--el-text-color-secondary)">Not applicable — Secret grants are scoped by namespace only</span>
+            <span v-else style="color: var(--el-text-color-secondary)">Not applicable — Secret/ConfigMap grants are scoped by namespace only</span>
           </el-form-item>
 
           <el-form-item label="Actions">

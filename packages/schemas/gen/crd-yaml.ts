@@ -18,7 +18,12 @@ import {
   RESOURCE_DESCRIPTORS,
   type ResourceDescriptor,
 } from '../src/crd-meta';
-import { JUMP_HOST_CEL, JUMP_HOST_CEL_MESSAGE } from '../src/hosts';
+import {
+  JUMP_HOST_CEL,
+  JUMP_HOST_CEL_MESSAGE,
+  VARS_FROM_CEL,
+  VARS_FROM_CEL_MESSAGE,
+} from '../src/hosts';
 import {
   HOST_SOURCE_CEL_CLUSTER_PARENT,
   HOST_SOURCE_CEL_NAMESPACED_PARENT,
@@ -153,6 +158,7 @@ const CEL_EXTRAS: Record<string, CelExtra[]> = {
   ],
   AnsibleHost: [
     { path: ['jumpHost'], rule: JUMP_HOST_CEL, message: JUMP_HOST_CEL_MESSAGE },
+    { path: ['varsFrom', '[]'], rule: VARS_FROM_CEL, message: VARS_FROM_CEL_MESSAGE },
     {
       path: ['jumpHost', 'hostRef'],
       rule: REF_CEL_CLUSTER_KIND_NO_NAMESPACE,
@@ -166,6 +172,7 @@ const CEL_EXTRAS: Record<string, CelExtra[]> = {
   ],
   ClusterAnsibleHost: [
     { path: ['jumpHost'], rule: JUMP_HOST_CEL, message: JUMP_HOST_CEL_MESSAGE },
+    { path: ['varsFrom', '[]'], rule: VARS_FROM_CEL, message: VARS_FROM_CEL_MESSAGE },
     {
       path: ['jumpHost', 'hostRef'],
       rule: REF_CEL_CLUSTER_KIND_NO_NAMESPACE,

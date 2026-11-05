@@ -111,20 +111,39 @@ spec:
                 vars:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-                varsBySecretRef:
+                varsFrom:
                   type: array
                   items:
                     type: object
                     properties:
-                      name:
-                        type: string
-                        minLength: 1
-                      namespace:
-                        type: string
-                        minLength: 1
-                    required:
-                      - name
-                      - namespace
+                      secretRef:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          namespace:
+                            type: string
+                            minLength: 1
+                        required:
+                          - name
+                          - namespace
+                      configMapRef:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          namespace:
+                            type: string
+                            minLength: 1
+                        required:
+                          - name
+                          - namespace
+                    x-kubernetes-validations:
+                      - rule: (has(self.secretRef)?1:0) + (has(self.configMapRef)?1:0) == 1
+                        message: exactly one of varsFrom[].secretRef or varsFrom[].configMapRef must be
+                          set
                 enabled:
                   type: boolean
                   default: true

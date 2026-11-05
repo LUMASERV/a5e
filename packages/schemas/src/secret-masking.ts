@@ -2,13 +2,14 @@
  * The one place a value read out of a `v1/Secret` is turned into something safe to hand a
  * client. Used by every client-facing rendering of secret-sourced data — today the resolved
  * inventory download (api/modules/inventory-download.ts), which shows *which* host vars a
- * `varsBySecretRef` entry contributes (hosts.ts) while withholding anything long enough to be
+ * `varsFrom` Secret contributes (hosts.ts) while withholding anything long enough to be
  * credential material. Note the threshold below: this masks, it does not redact unconditionally.
  *
  * The operator deliberately does NOT mask — an `ansible-playbook` run needs the real values. It
  * keeps them out of the artifacts it generates a different way: each referenced Secret is mounted
  * into the Job and the rendered inventory reads the mounted files, so no value is written into the
- * inventory ConfigMap at all (see operator/resolvers/inventory-render.ts's `secretVarLookup`).
+ * inventory ConfigMap at all (see operator/resolvers/inventory-render.ts's `varsFileLookup`).
+ * A `varsFrom` ConfigMap source is not masked at all — it is not a credential store.
  */
 
 /**

@@ -9,8 +9,8 @@ import {
   planList,
   resolveEffectivePermissions,
 } from '../auth/permission-engine';
-import { type SecretUseDenial, deniedSecretUse } from '../auth/secret-use';
 import { extractBearerToken } from '../auth/session';
+import { type VarsFromDenial, deniedVarsFromUse } from '../auth/vars-from';
 import type { AnyElysia } from '../lib/elysia-types';
 import { sseResponse } from '../lib/sse';
 import { WatchHub } from '../lib/watch-hub';
@@ -37,18 +37,19 @@ function forbidden(
 }
 
 /**
- * A write blocked not by the kind's own grant but by a `Secret` the body wants dereferenced (see
- * auth/secret-use.ts). Unlike `forbidden` above, `error` carries the specific reason rather than
- * a bare 'forbidden': "you can create hosts, just not ones pointing at that Secret" is not
- * something the caller can work out from the type/action pair alone, and the UI surfaces `error`
- * verbatim. Still a 403, so the stage-as-change-request on-ramp (useStageOnDenied.ts) still
- * offers itself — an approver who does hold `use` can apply the very same change.
+ * A write blocked not by the kind's own grant but by a `varsFrom` source the body wants
+ * dereferenced (see auth/vars-from.ts). Unlike `forbidden` above, `error` carries the specific
+ * reason rather than a bare 'forbidden': "you can create hosts, just not ones pointing at that
+ * Secret" is not something the caller can work out from the type/action pair alone, and the UI
+ * surfaces `error` verbatim. Still a 403, so the stage-as-change-request on-ramp
+ * (useStageOnDenied.ts) still offers itself — an approver who does hold `use` can apply the very
+ * same change.
  */
-function forbiddenSecretUse(set: { status: number }, denial: SecretUseDenial) {
+function forbiddenVarsFromUse(set: { status: number }, denial: VarsFromDenial) {
   set.status = 403;
   return {
     error: denial.message,
-    type: 'Secret',
+    type: denial.type,
     namespace: denial.namespace,
     name: denial.name,
     action: 'use',
@@ -167,8 +168,8 @@ export function registerResourceRoutes(
       if (!canAct(perms, { type: descriptor.kind, namespace, labels: desiredLabels }, 'create')) {
         return forbidden(set, descriptor.kind, namespace, 'create');
       }
-      const secretDenial = deniedSecretUse(perms, descriptor.kind, namespace, body);
-      if (secretDenial) return forbiddenSecretUse(set, secretDenial);
+      const varsFromDenial = deniedVarsFromUse(perms, descriptor.kind, namespace, body);
+      if (varsFromDenial) return forbiddenVarsFromUse(set, varsFromDenial);
 
       set.status = 201;
       return client.create(descriptor, body, 'self', namespace);
@@ -195,8 +196,8 @@ export function registerResourceRoutes(
           'update',
         ) && canAct(perms, { type: descriptor.kind, namespace, labels: desiredLabels }, 'update');
       if (!ok) return forbidden(set, descriptor.kind, namespace, 'update');
-      const secretDenial = deniedSecretUse(perms, descriptor.kind, namespace, body);
-      if (secretDenial) return forbiddenSecretUse(set, secretDenial);
+      const varsFromDenial = deniedVarsFromUse(perms, descriptor.kind, namespace, body);
+      if (varsFromDenial) return forbiddenVarsFromUse(set, varsFromDenial);
 
       return client.replace(descriptor, p.name!, body, 'self', namespace);
     });
@@ -221,8 +222,8 @@ export function registerResourceRoutes(
           'update',
         ) && canAct(perms, { type: descriptor.kind, namespace, labels: desiredLabels }, 'update');
       if (!ok) return forbidden(set, descriptor.kind, namespace, 'update');
-      const secretDenial = deniedSecretUse(perms, descriptor.kind, namespace, body);
-      if (secretDenial) return forbiddenSecretUse(set, secretDenial);
+      const varsFromDenial = deniedVarsFromUse(perms, descriptor.kind, namespace, body);
+      if (varsFromDenial) return forbiddenVarsFromUse(set, varsFromDenial);
 
       return client.patch(descriptor, p.name!, body, 'self', namespace);
     });

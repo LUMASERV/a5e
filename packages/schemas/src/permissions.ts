@@ -16,12 +16,13 @@ const EXCLUDED_PERMISSION_TYPES = new Set(['Group', 'User']);
 
 /**
  * Kinds a permission can target that are NOT one of this project's CRDs, so they can't come from
- * RESOURCE_DESCRIPTORS. `Secret` is the built-in `v1/Secret`, and the only action it ever carries
- * is `use` — a5e never lists, reads back or writes a user's Secrets on their behalf, it only
- * *dereferences* one a spec names (`AnsibleHost.spec.varsBySecretRef`, see hosts.ts), which is
- * exactly the operation this gates.
+ * RESOURCE_DESCRIPTORS — the built-in `v1/Secret` and `v1/ConfigMap`. The only action either ever
+ * carries is `use`: a5e never lists, reads back or writes a user's Secrets/ConfigMaps on their
+ * behalf, it only *dereferences* one a spec names (`AnsibleHost.spec.varsFrom`, see hosts.ts),
+ * which is exactly the operation this gates. A ConfigMap is gated for the same reason a Secret is
+ * — it is someone else's data either way; only the masking of resolved values differs.
  */
-export const BUILTIN_PERMISSION_TYPES = ['Secret'] as const;
+export const BUILTIN_PERMISSION_TYPES = ['Secret', 'ConfigMap'] as const;
 
 const allPermissionTypes: string[] = [
   ...RESOURCE_DESCRIPTORS.filter((d) => !EXCLUDED_PERMISSION_TYPES.has(d.kind)).map((d) => d.kind),
@@ -43,8 +44,8 @@ export const PERMISSION_ACTIONS = [
   'retry', // AnsibleRun retry (modules/ansibleruns.ts) — 'get' also covers viewing/downloading logs
   'download', // AnsibleInventory/ClusterAnsibleInventory resolved-YAML export
   'import', // AnsibleSSHKey/ClusterAnsibleSSHKey generate/upload convenience routes
-  'use', // v1/Secret dereferenced by AnsibleHost/ClusterAnsibleHost `varsBySecretRef`
-  // (auth/secret-use.ts) — the only action the built-in `Secret` type takes
+  'use', // v1/Secret or v1/ConfigMap dereferenced by AnsibleHost/ClusterAnsibleHost `varsFrom`
+  // (auth/vars-from.ts) — the only action the built-in types take
   'approve', // ChangeRequest approve AND decline — one action covers both
   'propose', // reserved: proposing a ChangeRequest is currently ungated for any logged-in user;
   // kept as a real action so a future tightening doesn't need a schema change.
@@ -66,14 +67,19 @@ export const permissionSchema = z
     labelSelector: labelSelectorSchema.optional(),
     actions: z.array(permissionActionSchema).min(1),
   })
-  // A `Secret` grant is namespace-scoped only: a5e never reads a Secret's labels (it only
-  // dereferences one a host's `varsBySecretRef` names, possibly before that Secret even exists),
-  // so `canActIgnoringLabelSelector` skips the selector for this type. Refusing the field here is
+  // A `Secret`/`ConfigMap` grant is namespace-scoped only: a5e never reads their labels (it only
+  // dereferences one a host's `varsFrom` names, possibly before that object even exists), so
+  // `canActIgnoringLabelSelector` skips the selector for these types. Refusing the field here is
   // what keeps that from silently widening a grant an admin wrote intending to narrow — the
   // alternative, honouring it, is not implementable, and quietly dropping it would be worse.
-  .refine((p) => p.type !== 'Secret' || p.labelSelector === undefined, {
-    message:
-      'labelSelector is not supported for type Secret — Secret grants are scoped by namespace only',
-    path: ['labelSelector'],
-  });
+  .refine(
+    (p) =>
+      !(BUILTIN_PERMISSION_TYPES as readonly string[]).includes(p.type) ||
+      p.labelSelector === undefined,
+    {
+      message:
+        'labelSelector is not supported for type Secret or ConfigMap — those grants are scoped by namespace only',
+      path: ['labelSelector'],
+    },
+  );
 export type Permission = z.infer<typeof permissionSchema>;

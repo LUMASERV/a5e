@@ -1,4 +1,4 @@
-import type { JumpChainHop, ResolvedGroup, ResolvedVarsSecret } from '@a5e/k8s-client';
+import type { JumpChainHop, ResolvedGroup, ResolvedVarsSource } from '@a5e/k8s-client';
 
 function formatIniValue(value: unknown): string {
   if (typeof value === 'string') return /\s/.test(value) ? JSON.stringify(value) : value;
@@ -7,12 +7,13 @@ function formatIniValue(value: unknown): string {
 }
 
 /**
- * Renders one Secret-sourced host var as a Jinja `file` lookup against the run-owned Secret copy
- * the Job mounts (job-builder.ts), rather than embedding the value itself. Three reasons this is
- * the value, not just a hiding place:
+ * Renders one `varsFrom`-sourced host var as a Jinja `file` lookup against the run-owned copy the
+ * Job mounts (job-builder.ts), rather than embedding the value itself. Three reasons this is the
+ * value, not just a hiding place:
  *
  *  - The inventory stays an ordinary ConfigMap, safe to read, diff and `kubectl get -o yaml` for
- *    debugging, while the values live only in a Secret that is a byte-for-byte copy of the source.
+ *    debugging, while a Secret's values live only in a Secret that is a byte-for-byte copy of the
+ *    source.
  *  - Ansible templates inventory var values, so a *literal* value containing `{{ ... }}` would
  *    blow the play up with an "undefined" error (verified against ansible-core 2.20). A lookup's
  *    *result* is not re-templated, so any byte sequence round-trips intact.
@@ -24,8 +25,8 @@ function formatIniValue(value: unknown): string {
  * host line (so the quotes make it one token, inner single quotes preserved) and then declines to
  * `literal_eval` it, leaving the template string intact for task-time evaluation.
  */
-function secretVarLookup(secret: ResolvedVarsSecret, key: string): string {
-  const path = `/host-vars/${secret.mountName}/${key}`;
+function varsFileLookup(source: ResolvedVarsSource, key: string): string {
+  const path = `/host-vars/${source.mountName}/${key}`;
   return `"{{ lookup('file', '${path}', rstrip=False) }}"`;
 }
 
@@ -65,15 +66,14 @@ export function renderInventoryIni(
           `ansible_ssh_common_args=${JSON.stringify(`-o StrictHostKeyChecking=accept-new -J ${proxyJump}`)}`,
         );
       }
-      // Secret-sourced vars first (in spec order, so a later `varsBySecretRef` entry overrides an
-      // earlier one), then inline `spec.vars` last — an explicit inline var always beats a
-      // Secret-sourced one of the same name (hosts.ts). `Object.entries` on the merged record
-      // keeps first-insertion order, so an overridden key stays where it first appeared while
-      // taking the winning value.
+      // `varsFrom` sources first (in spec order, so a later entry overrides an earlier one), then
+      // inline `spec.vars` last — an explicit inline var always beats a sourced one of the same
+      // name (hosts.ts). `Object.entries` on the merged record keeps first-insertion order, so an
+      // overridden key stays where it first appeared while taking the winning value.
       const hostVars: Record<string, string> = {};
-      for (const secret of host.varsSecrets ?? []) {
-        for (const key of Object.keys(secret.data)) {
-          hostVars[key] = secretVarLookup(secret, key);
+      for (const source of host.varsSources ?? []) {
+        for (const key of Object.keys(source.data)) {
+          hostVars[key] = varsFileLookup(source, key);
         }
       }
       for (const [key, value] of Object.entries(host.spec.vars ?? {})) {

@@ -65,16 +65,21 @@ rules:
   # identity, cluster-wide since a ClusterAnsibleSSHKey's target namespace can be any namespace.
   #
   # `get` is for one narrow read: the resolved-inventory download (modules/inventory-download.ts)
-  # dereferences each host's `spec.varsBySecretRef` to list WHICH vars a Secret contributes, and
-  # every value is masked before it reaches the response (@a5e/schemas' secret-masking.ts) — the
-  # API never returns a Secret's contents in the clear, and never reads one outside that path.
-  # RBAC can't scope `get` to only the dynamically-named Secrets a spec happens to reference, so
+  # dereferences each host's `spec.varsFrom` to list WHICH vars each source contributes. A Secret's
+  # values are masked before they reach the response (@a5e/schemas' secret-masking.ts) — the API
+  # never returns a Secret's contents in the clear, and never reads one outside that path.
+  # RBAC can't scope `get` to only the dynamically-named objects a spec happens to reference, so
   # this is cluster-wide by necessity — the same accepted trade-off the operator's ClusterRole
-  # documents, and the reason `use` on the built-in `Secret` permission type (auth/secret-use.ts)
-  # gates who may point a host at a Secret in the first place.
+  # documents, and the reason `use` on the built-in `Secret`/`ConfigMap` permission types
+  # (auth/vars-from.ts) gates who may point a host at one in the first place.
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "create"]
+  # Same narrow read for a `varsFrom.configMapRef`. Note this is a ClusterRole `get` on configmaps,
+  # separate from the namespaced, resourceNames-scoped Role below that covers a5e's own settings.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

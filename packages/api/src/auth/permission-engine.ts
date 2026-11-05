@@ -80,10 +80,10 @@ export function canAct(
 /**
  * `canAct` without the label-selector check, for a target whose labels this app never reads.
  *
- * The only such target is the built-in `Secret` type (`use`, see auth/secret-use.ts): a5e does not
- * manage Secrets, it only dereferences one a host's `varsBySecretRef` names, and it may legitimately
- * be pointed at a Secret that does not exist yet — so there are no labels to match a selector
- * against. Routing that decision through `canAct` was a real bug: with no `labels` on the target,
+ * The only such targets are the built-in `Secret`/`ConfigMap` types (`use`, see auth/vars-from.ts):
+ * a5e does not manage them, it only dereferences one a host's `varsFrom` names, and it may
+ * legitimately be pointed at an object that does not exist yet — so there are no labels to match a
+ * selector against. Routing that decision through `canAct` was a real bug: with no `labels` on the target,
  * `labelSelectorMatches` rejects every grant that carries a selector, so a broad
  * `{ type: '*', actions: ['*'], labelSelector: ... }` grant would authorize everything in the app
  * *except* using a Secret. A selector on such a grant scopes a5e's own labelled objects; it says

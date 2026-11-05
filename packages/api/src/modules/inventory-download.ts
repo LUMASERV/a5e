@@ -1,9 +1,9 @@
 import {
   type JumpChainHop,
   type ResolvedGroup,
-  type SecretReader,
-  mergeSecretVars,
+  type VarsSourceReader,
   resolveInventoryGroups,
+  varsSourceValues,
 } from '@a5e/k8s-client';
 import { RESOURCE_DESCRIPTORS_BY_KIND, maskSecretValues } from '@a5e/schemas';
 import type { AnsibleInventorySpec, AnsibleInventoryStatus, CustomResource } from '@a5e/schemas';
@@ -21,12 +21,13 @@ function hopToSshTarget(hop: JumpChainHop): string {
 }
 
 /**
- * Reads a Secret as the API's own identity, for the sole purpose of listing which host vars a
- * `varsBySecretRef` entry contributes — every value it returns is masked before it reaches the
- * response body (see `maskSecretValues` below).
+ * Reads a `varsFrom` source as the API's own identity, to list which host vars it contributes.
+ * A Secret's values are masked before they reach the response body (see below); a ConfigMap's are
+ * not, that being the point of offering both.
  */
-const secretReader: SecretReader = {
+const varsSourceReader: VarsSourceReader = {
   getSecret: (namespace, name) => coreApi.readNamespacedSecret({ name, namespace }),
+  getConfigMap: (namespace, name) => coreApi.readNamespacedConfigMap({ name, namespace }),
 };
 
 /**
@@ -36,12 +37,13 @@ const secretReader: SecretReader = {
  * (those get an INI rendering via renderInventoryIni, plus a per-host SSH key mount path that
  * only means anything inside a Job's Pod, deliberately omitted here).
  *
- * Secret-sourced host vars (`AnsibleHost.spec.varsBySecretRef`) appear here by name, with any
- * value longer than `SECRET_VALUE_MASK_MIN_LENGTH` replaced by a mask — the download is a
- * human-readable view of what the inventory resolves to, not a credential export, and `download`
- * is a far weaker grant than `use` on the Secrets themselves. A downloaded file therefore needs
- * those vars supplied another way before it will actually run. Values at or under that length are
- * passed through verbatim; see secret-masking.ts for why the threshold exists.
+ * `varsFrom`-sourced host vars (hosts.ts) appear here by name. A Secret's values are masked above
+ * `SECRET_VALUE_MASK_MIN_LENGTH` — the download is a human-readable view of what the inventory
+ * resolves to, not a credential export, and `download` is a far weaker grant than `use` on the
+ * Secret itself, so a downloaded file needs those vars supplied another way before it will
+ * actually run. Values at or under that length are passed through verbatim; see secret-masking.ts
+ * for why the threshold exists. A ConfigMap's values are shown as-is — a ConfigMap is not a
+ * credential store, and masking it would make the download useless for the case it exists for.
  */
 export function renderInventoryYaml(
   topLevelVars: Record<string, unknown> | undefined,
@@ -62,11 +64,11 @@ export function renderInventoryYaml(
         const proxyJump = host.jumpChain.map(hopToSshTarget).join(',');
         hostVars.ansible_ssh_common_args = `-o StrictHostKeyChecking=accept-new -J ${proxyJump}`;
       }
-      Object.assign(
-        hostVars,
-        maskSecretValues(mergeSecretVars(host.varsSecrets)),
-        host.spec.vars ?? {},
-      );
+      for (const source of host.varsSources ?? []) {
+        const values = varsSourceValues(source);
+        Object.assign(hostVars, source.kind === 'Secret' ? maskSecretValues(values) : values);
+      }
+      Object.assign(hostVars, host.spec.vars ?? {});
       hostsNode[inventoryHostname] = hostVars;
     }
 
@@ -114,7 +116,7 @@ async function handleDownload(
   // Inventory (see permission-engine.ts plan notes); only ChangeRequest items get per-item checks.
   const groups = await resolveInventoryGroups(client, 'self', obj.spec, namespace, {
     resolveJumpChains: true,
-    secretReader,
+    varsSourceReader,
   });
   const yaml = renderInventoryYaml(obj.spec.vars, groups);
 
