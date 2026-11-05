@@ -11,7 +11,7 @@
   },
   "scripts": {
     "generate": "bun run gen/crd-yaml.ts",
-    "test": "bun test",
+    "test": "echo \"no schemas unit tests yet\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

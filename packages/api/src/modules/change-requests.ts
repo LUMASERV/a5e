@@ -4,9 +4,15 @@ import type {
   ChangeRequestSpec,
   ChangeRequestStatus,
   CustomResource,
+  Permission,
 } from '@a5e/schemas';
 import { authorize } from '../auth/authorize';
-import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
+import type { ActionTarget } from '../auth/permission-engine';
+import {
+  canAct,
+  mergedLabelsAfterPatch,
+  resolveEffectivePermissions,
+} from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { Session } from '../auth/session';
 import { readAppSettings } from '../lib/app-settings-store';
@@ -26,12 +32,126 @@ function appUserId(session: Session): string {
     : `oidc:${session.identity.impersonateUser}`;
 }
 
-function itemTarget(item: ChangeItem) {
-  return {
-    type: item.type,
-    namespace: item.namespace,
-    labels: (item.body as { metadata?: { labels?: Record<string, string> } })?.metadata?.labels,
-  };
+type ItemLabels = Record<string, string> | undefined;
+
+function bodyLabelsOf(item: ChangeItem): ItemLabels {
+  return (item.body as { metadata?: { labels?: ItemLabels } })?.metadata?.labels;
+}
+
+/**
+ * The namespace an item is authorized against. Derived from the kind's own descriptor, NEVER from
+ * `item.namespace` — the schema accepts a namespace on any item, but the k8s client ignores it for
+ * a cluster-scoped kind. Trusting it let a staged `ClusterAnsibleHost` delete carry
+ * `namespace: 'team-a'`, satisfy a team-a-only approve grant, and then delete the cluster-wide
+ * object (the same bypass namespaceMatches was tightened to prevent).
+ */
+export function authNamespace(item: ChangeItem): string | undefined {
+  return RESOURCE_DESCRIPTORS_BY_KIND[item.type]?.scope === 'Namespaced'
+    ? item.namespace
+    : undefined;
+}
+
+/** Identifies the object an item acts on, so repeated items on one object can be chained below. */
+function targetKey(item: ChangeItem): string {
+  return `${item.type}/${authNamespace(item) ?? ''}/${item.name ?? ''}`;
+}
+
+/**
+ * The approve/decline permission targets for every staged item, in order.
+ *
+ * Labels come from the object as it exists in the cluster, never from `item.body` — that body is
+ * whatever the *requester* typed. Trusting it meant a requester could stage an update to a
+ * production object while writing `labels: {env: dev}` into the body, and an approver whose grant
+ * only covers `env=dev` would see a dev-looking item, approve it, and the patch would land on the
+ * production object. A `delete` item carries no body at all, so every label-restricted grant was
+ * being evaluated against no labels (and a `NotIn`-style grant matched everything, prod included).
+ *
+ * An `update` is checked on both sides — before and after its patch — the same rule the plain
+ * PATCH route applies (see modules/resource-routes.ts), so approving can't relabel an object out
+ * of the approver's own scope.
+ *
+ * Items are walked in apply order with the labels they project carried forward, because the apply
+ * loop applies them in that same order. Checking each one against the *live* labels instead let
+ * two patches on one object jointly escape every grant while passing individually: with grants for
+ * `env=dev` or `team=a` on `{env: dev, team: a}`, a patch to `env=prod` and a patch to `team=b`
+ * each look fine against the starting labels, but applied in sequence they leave `{env: prod,
+ * team: b}`, which matches neither. The UI stages one item per edit and does not merge repeated
+ * edits of the same object (see ui/src/stores/changeRequestDraft.ts's `addItem`), so this is an
+ * ordinary draft, not only a hand-crafted request.
+ */
+export async function approvalTargets(changes: ChangeItem[]): Promise<ActionTarget[][]> {
+  const perItem: ActionTarget[][] = [];
+  const projected = new Map<string, ItemLabels>();
+
+  for (const item of changes) {
+    const base = { type: item.type, namespace: authNamespace(item) };
+    const key = targetKey(item);
+    const targets: ActionTarget[] = [];
+    perItem.push(targets);
+
+    if (item.action === 'create') {
+      const labels = bodyLabelsOf(item);
+      targets.push({ ...base, labels });
+      projected.set(key, labels);
+      continue;
+    }
+
+    let before: ItemLabels;
+    if (projected.has(key)) {
+      before = projected.get(key);
+    } else {
+      const itemDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[item.type];
+      // Unknown kind, or the object is already gone: there is no live object to authorize
+      // against, and applying the item can only 404 — harmless. Contribute no target rather than
+      // denying, so a stale request can still be declined (declining executes nothing). Any other
+      // lookup failure propagates and is treated as a denial by the caller.
+      if (!itemDescriptor) continue;
+      const current = await client
+        .get<{ metadata: { labels?: Record<string, string> } }>(
+          itemDescriptor,
+          item.name!,
+          'self',
+          authNamespace(item),
+        )
+        .catch((err) => {
+          if ((err as { code?: number }).code === 404) return undefined;
+          throw err;
+        });
+      if (!current) continue;
+      before = current.metadata.labels;
+    }
+
+    targets.push({ ...base, labels: before });
+    if (item.action === 'delete') {
+      projected.delete(key);
+      continue;
+    }
+    const after = mergedLabelsAfterPatch(before, item.body);
+    targets.push({ ...base, labels: after });
+    projected.set(key, after);
+  }
+
+  return perItem;
+}
+
+/**
+ * Indices of the staged items the caller may NOT approve, or `'error'` if the targets couldn't be
+ * resolved at all — any lookup failure other than "the object is gone" denies the whole request,
+ * so this fails closed.
+ */
+async function deniedItemIndices(
+  perms: Permission[],
+  changes: ChangeItem[],
+): Promise<number[] | 'error'> {
+  let perItem: ActionTarget[][];
+  try {
+    perItem = await approvalTargets(changes);
+  } catch {
+    return 'error';
+  }
+  return perItem.flatMap((targets, index) =>
+    targets.every((target) => canAct(perms, target, 'approve')) ? [] : [index],
+  );
 }
 
 /**
@@ -135,12 +255,40 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      const denied = cr.spec.changes
-        .map((item, index) => ({ index, item }))
-        .filter(({ item }) => !canAct(perms, itemTarget(item), 'approve'));
+      const denied = await deniedItemIndices(perms, cr.spec.changes);
+      if (denied === 'error') {
+        set.status = 403;
+        return { error: 'could not verify the staged objects — approval denied' };
+      }
       if (denied.length > 0) {
         set.status = 403;
-        return { error: 'forbidden', deniedItems: denied.map((d) => d.index) };
+        return { error: 'forbidden', deniedItems: denied };
+      }
+
+      const reviewed = {
+        reviewedBy: appUserId(auth.session),
+        reviewedByName: auth.session.displayName,
+        reviewedAt: new Date().toISOString(),
+      };
+
+      // Claim the request before applying anything. `replaceStatus` carries the resourceVersion we
+      // read above, so of two approvers racing (or one double-click) exactly one write lands and
+      // the other gets a 409 — without this both passed the `phase !== 'Pending'` check above and
+      // both ran the loop below, applying every change twice and recording the second pass's
+      // 409s/404s as `Failed` even though everything had actually been applied.
+      try {
+        await client.replaceStatus(
+          descriptor,
+          params.name,
+          { ...cr, status: { ...cr.status, ...reviewed, phase: 'Approved' } },
+          'self',
+        );
+      } catch (err) {
+        if ((err as { code?: number }).code === 409) {
+          set.status = 409;
+          return { error: 'already being reviewed by someone else' };
+        }
+        throw err;
       }
 
       const results: NonNullable<ChangeRequestStatus['results']> = [];
@@ -176,18 +324,7 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
         }
       }
       const phase = results.every((r) => r.status === 'Applied') ? 'Applied' : 'Failed';
-      await client.patchStatus(
-        descriptor,
-        params.name,
-        {
-          phase,
-          reviewedBy: appUserId(auth.session),
-          reviewedByName: auth.session.displayName,
-          reviewedAt: new Date().toISOString(),
-          results,
-        },
-        'self',
-      );
+      await client.patchStatus(descriptor, params.name, { phase, ...reviewed, results }, 'self');
       return { ok: true, phase, results };
     })
 
@@ -201,24 +338,39 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      const denied = cr.spec.changes.some((item) => !canAct(perms, itemTarget(item), 'approve'));
-      if (denied) {
+      const denied = await deniedItemIndices(perms, cr.spec.changes);
+      if (denied === 'error' || denied.length > 0) {
         set.status = 403;
         return { error: 'forbidden' };
       }
 
-      await client.patchStatus(
-        descriptor,
-        params.name,
-        {
-          phase: 'Declined',
-          reviewedBy: appUserId(auth.session),
-          reviewedByName: auth.session.displayName,
-          reviewedAt: new Date().toISOString(),
-          declineReason: (body as { reason?: string })?.reason,
-        },
-        'self',
-      );
+      // replaceStatus rather than patchStatus: declining is a single write, so carrying the
+      // resourceVersion read above is enough to lose cleanly against an approver who got there
+      // first, instead of overwriting their verdict.
+      try {
+        await client.replaceStatus(
+          descriptor,
+          params.name,
+          {
+            ...cr,
+            status: {
+              ...cr.status,
+              phase: 'Declined',
+              reviewedBy: appUserId(auth.session),
+              reviewedByName: auth.session.displayName,
+              reviewedAt: new Date().toISOString(),
+              declineReason: (body as { reason?: string })?.reason,
+            },
+          },
+          'self',
+        );
+      } catch (err) {
+        if ((err as { code?: number }).code === 409) {
+          set.status = 409;
+          return { error: 'already being reviewed by someone else' };
+        }
+        throw err;
+      }
       return { ok: true };
     });
 }

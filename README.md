@@ -15,8 +15,14 @@ Vue-based UI. "A5E" is a numeronym for "Ansible" (A + 5 letters + E), the same p
   username/password accounts; either way, the API hands back its own opaque bearer token for the
   UI to store and attach as `Authorization: Bearer` on every call — not a cookie, so the UI and
   API can be deployed on independent origins/domains (see `charts/a5e`'s separate
-  `ui.ingress`/`api.ingress`). Every call then relays to the Kubernetes API **impersonating the
-  logged-in user**, so real Kubernetes RBAC is the actual source of authorization truth.
+  `ui.ingress`/`api.ingress`). Every call then goes to the Kubernetes API as the API's **own
+  ServiceAccount** — it does not impersonate the logged-in user, and its RBAC deliberately grants
+  no `impersonate` verb (see `charts/a5e/templates/rbac-api.yaml`). **Authorization is the
+  fine-grained `Permission` model in `packages/api/src/auth/permission-engine.ts`** — per kind,
+  namespace, label selector and action, resolved from the user's own grants plus their `Group`
+  memberships — and nothing else. Cluster RBAC is not a second line of defence behind it: because
+  the API holds broad grants, that permission engine is the authorization boundary, so review it
+  (and the `Permission`/`Group` objects you hand out) accordingly.
 - **UI** (`packages/ui`) — Vue 3 + Element Plus, generic list/form components driven by a shared
   per-kind resource descriptor so the 10 CRD kinds don't need hand-duplicated CRUD screens.
 - **CRDs** (`packages/schemas`) — Zod schemas are the single source of truth, generating both the

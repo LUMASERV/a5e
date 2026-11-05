@@ -50,8 +50,15 @@ const RUN_LABEL = `${API_GROUP}/run`;
 const RUN_UID_LABEL = `${API_GROUP}/run-uid`;
 const RUN_SHARD_LABEL = `${API_GROUP}/run-shard`;
 
-function ansibleExtraArgs(options: AnsibleOptions | undefined): string {
-  if (!options) return '';
+/**
+ * Each flag/value as its own argv entry, passed through the container's `args` — never joined
+ * into one string for the shell to re-split. A joined string splits on spaces rather than on the
+ * boundaries below, so a tag or `--limit` pattern containing a space silently turned into two
+ * arguments (`--tags "deploy web"` -> ansible reads `web` as a second playbook path), and
+ * anything a user could put in these fields became injectable `ansible-playbook` flags.
+ */
+function ansibleExtraArgs(options: AnsibleOptions | undefined): string[] {
+  if (!options) return [];
   const args: string[] = [];
   if (options.verbosity) args.push(`-${'v'.repeat(options.verbosity)}`);
   if (options.checkMode) args.push('--check');
@@ -59,7 +66,7 @@ function ansibleExtraArgs(options: AnsibleOptions | undefined): string {
   if (options.forks) args.push('--forks', String(options.forks));
   for (const tag of options.tags ?? []) args.push('--tags', tag);
   for (const tag of options.skipTags ?? []) args.push('--skip-tags', tag);
-  return args.join(' ');
+  return args;
 }
 
 /**
@@ -196,13 +203,12 @@ export function buildJobSpec(input: JobBuildInput): k8s.V1Job {
             {
               name: 'ansible-playbook',
               image: input.runnerImage,
-              args: ['playbook'],
+              args: ['playbook', ...ansibleExtraArgs(input.ansibleOptions)],
               env: [
                 { name: 'PLAYBOOK_DIR', value: playbookDir },
                 { name: 'ENTRY_POINT', value: input.entryPoint },
                 { name: 'INVENTORY_FILE', value: '/inventory/inventory.ini' },
                 { name: 'EXTRA_VARS_FILE', value: '/extra-vars/extra-vars.json' },
-                { name: 'ANSIBLE_EXTRA_ARGS', value: ansibleExtraArgs(input.ansibleOptions) },
                 // ansible-playbook disables color by default when stdout isn't a TTY (always
                 // true here, captured via the k8s pod log API) — force it so the UI's log
                 // viewer has ANSI codes to render.

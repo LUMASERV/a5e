@@ -279,6 +279,39 @@ export class CustomResourceClient {
     )) as T;
   }
 
+  /**
+   * Full replace of the status subresource. Unlike `patchStatus` this carries the object's
+   * `metadata.resourceVersion`, so the write is rejected with a 409 if anything changed since
+   * `body` was read — the only way to turn a read-check-write sequence on status into one that
+   * two concurrent callers can't both win (see the API's ChangeRequest approve route).
+   */
+  async replaceStatus<T>(
+    descriptor: ResourceDescriptor,
+    name: string,
+    body: unknown,
+    identity: CallerIdentity,
+    namespace?: string,
+  ): Promise<T> {
+    if (descriptor.scope === 'Namespaced') {
+      if (!namespace) throw new Error(`${descriptor.kind} is namespaced — namespace is required`);
+      return (await this.api.replaceNamespacedCustomObjectStatus(
+        {
+          group: API_GROUP,
+          version: API_VERSION,
+          namespace,
+          plural: descriptor.plural,
+          name,
+          body,
+        },
+        withImpersonation(identity),
+      )) as T;
+    }
+    return (await this.api.replaceClusterCustomObjectStatus(
+      { group: API_GROUP, version: API_VERSION, plural: descriptor.plural, name, body },
+      withImpersonation(identity),
+    )) as T;
+  }
+
   async delete(
     descriptor: ResourceDescriptor,
     name: string,

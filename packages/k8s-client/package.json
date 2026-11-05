@@ -10,7 +10,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "bun test",
+    "test": "echo \"no k8s-client unit tests yet\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
