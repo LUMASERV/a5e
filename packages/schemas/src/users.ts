@@ -21,8 +21,12 @@ export const APP_ROLES = ['none', 'user', 'admin'] as const;
  * role/permissions via this object would be a privilege-escalation vector.
  */
 export const userSpecSchema = z.object({
-  /** Set for a local-loginable account (see auth/user-passwords.ts for its password hash, keyed
-   * by this same username). Absent for an OIDC-only identity that has never been given one. */
+  /** The identity's username: chosen by an admin for a local-loginable account (see
+   * auth/user-passwords.ts for its password hash, keyed by this same username), or derived from
+   * the IdP's claims on first SSO login for an auto-tracked identity. Whether a password login
+   * actually exists is NOT encoded here — that's the object's `local-`/`oidc-` name prefix (see
+   * auth/user-store.ts's `isLocalAccount`). Only absent for identities tracked before usernames
+   * were derived automatically, and backfilled on their next login. */
   username: z.string().optional(),
   /** The OIDC `sub` claim, set once this identity has logged in via SSO at least once (tracked)
    * or been linked to a local account by matching email. Absent for a local-only account. */
