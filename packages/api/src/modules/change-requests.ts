@@ -32,54 +32,126 @@ function appUserId(session: Session): string {
     : `oidc:${session.identity.impersonateUser}`;
 }
 
+type ItemLabels = Record<string, string> | undefined;
+
+function bodyLabelsOf(item: ChangeItem): ItemLabels {
+  return (item.body as { metadata?: { labels?: ItemLabels } })?.metadata?.labels;
+}
+
 /**
- * The approve/decline permission check for one staged item.
+ * The namespace an item is authorized against. Derived from the kind's own descriptor, NEVER from
+ * `item.namespace` — the schema accepts a namespace on any item, but the k8s client ignores it for
+ * a cluster-scoped kind. Trusting it let a staged `ClusterAnsibleHost` delete carry
+ * `namespace: 'team-a'`, satisfy a team-a-only approve grant, and then delete the cluster-wide
+ * object (the same bypass namespaceMatches was tightened to prevent).
+ */
+export function authNamespace(item: ChangeItem): string | undefined {
+  return RESOURCE_DESCRIPTORS_BY_KIND[item.type]?.scope === 'Namespaced'
+    ? item.namespace
+    : undefined;
+}
+
+/** Identifies the object an item acts on, so repeated items on one object can be chained below. */
+function targetKey(item: ChangeItem): string {
+  return `${item.type}/${authNamespace(item) ?? ''}/${item.name ?? ''}`;
+}
+
+/**
+ * The approve/decline permission targets for every staged item, in order.
  *
- * The labels MUST come from the object as it exists in the cluster, never from `item.body` — that
- * body is whatever the *requester* typed. Trusting it meant a requester could stage an update to a
+ * Labels come from the object as it exists in the cluster, never from `item.body` — that body is
+ * whatever the *requester* typed. Trusting it meant a requester could stage an update to a
  * production object while writing `labels: {env: dev}` into the body, and an approver whose grant
  * only covers `env=dev` would see a dev-looking item, approve it, and the patch would land on the
  * production object. A `delete` item carries no body at all, so every label-restricted grant was
  * being evaluated against no labels (and a `NotIn`-style grant matched everything, prod included).
  *
- * For an `update` the post-patch labels are checked too — the same both-sides rule the plain
- * PATCH route applies (see modules/resource-routes.ts), so approving can't be used to relabel an
- * object out of the approver's own scope.
+ * An `update` is checked on both sides — before and after its patch — the same rule the plain
+ * PATCH route applies (see modules/resource-routes.ts), so approving can't relabel an object out
+ * of the approver's own scope.
+ *
+ * Items are walked in apply order with the labels they project carried forward, because the apply
+ * loop applies them in that same order. Checking each one against the *live* labels instead let
+ * two patches on one object jointly escape every grant while passing individually: with grants for
+ * `env=dev` or `team=a` on `{env: dev, team: a}`, a patch to `env=prod` and a patch to `team=b`
+ * each look fine against the starting labels, but applied in sequence they leave `{env: prod,
+ * team: b}`, which matches neither. The UI stages one item per edit and does not merge repeated
+ * edits of the same object (see ui/src/stores/changeRequestDraft.ts's `addItem`), so this is an
+ * ordinary draft, not only a hand-crafted request.
  */
-async function itemTargets(item: ChangeItem): Promise<ActionTarget[]> {
-  const base = { type: item.type, namespace: item.namespace };
-  const bodyLabels = (item.body as { metadata?: { labels?: Record<string, string> } })?.metadata
-    ?.labels;
+export async function approvalTargets(changes: ChangeItem[]): Promise<ActionTarget[][]> {
+  const perItem: ActionTarget[][] = [];
+  const projected = new Map<string, ItemLabels>();
 
-  if (item.action === 'create') return [{ ...base, labels: bodyLabels }];
+  for (const item of changes) {
+    const base = { type: item.type, namespace: authNamespace(item) };
+    const key = targetKey(item);
+    const targets: ActionTarget[] = [];
+    perItem.push(targets);
 
-  const itemDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[item.type];
-  if (!itemDescriptor) return [{ ...base, labels: bodyLabels }]; // unknown kind — approve will fail anyway
-  const current = await client.get<{ metadata: { labels?: Record<string, string> } }>(
-    itemDescriptor,
-    item.name!,
-    'self',
-    item.namespace,
-  );
+    if (item.action === 'create') {
+      const labels = bodyLabelsOf(item);
+      targets.push({ ...base, labels });
+      projected.set(key, labels);
+      continue;
+    }
 
-  if (item.action === 'delete') return [{ ...base, labels: current.metadata.labels }];
-  return [
-    { ...base, labels: current.metadata.labels },
-    { ...base, labels: mergedLabelsAfterPatch(current.metadata.labels, item.body) },
-  ];
+    let before: ItemLabels;
+    if (projected.has(key)) {
+      before = projected.get(key);
+    } else {
+      const itemDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[item.type];
+      // Unknown kind, or the object is already gone: there is no live object to authorize
+      // against, and applying the item can only 404 — harmless. Contribute no target rather than
+      // denying, so a stale request can still be declined (declining executes nothing). Any other
+      // lookup failure propagates and is treated as a denial by the caller.
+      if (!itemDescriptor) continue;
+      const current = await client
+        .get<{ metadata: { labels?: Record<string, string> } }>(
+          itemDescriptor,
+          item.name!,
+          'self',
+          authNamespace(item),
+        )
+        .catch((err) => {
+          if ((err as { code?: number }).code === 404) return undefined;
+          throw err;
+        });
+      if (!current) continue;
+      before = current.metadata.labels;
+    }
+
+    targets.push({ ...base, labels: before });
+    if (item.action === 'delete') {
+      projected.delete(key);
+      continue;
+    }
+    const after = mergedLabelsAfterPatch(before, item.body);
+    targets.push({ ...base, labels: after });
+    projected.set(key, after);
+  }
+
+  return perItem;
 }
 
-/** True only if the caller may approve every target `itemTargets` produced for this item. A
- * missing object (deleted since it was staged) counts as not approvable — approving it would fail
- * anyway, and a 404 must not read as "allowed". */
-async function canApproveItem(perms: Permission[], item: ChangeItem): Promise<boolean> {
-  let targets: ActionTarget[];
+/**
+ * Indices of the staged items the caller may NOT approve, or `'error'` if the targets couldn't be
+ * resolved at all — any lookup failure other than "the object is gone" denies the whole request,
+ * so this fails closed.
+ */
+async function deniedItemIndices(
+  perms: Permission[],
+  changes: ChangeItem[],
+): Promise<number[] | 'error'> {
+  let perItem: ActionTarget[][];
   try {
-    targets = await itemTargets(item);
+    perItem = await approvalTargets(changes);
   } catch {
-    return false;
+    return 'error';
   }
-  return targets.every((target) => canAct(perms, target, 'approve'));
+  return perItem.flatMap((targets, index) =>
+    targets.every((target) => canAct(perms, target, 'approve')) ? [] : [index],
+  );
 }
 
 /**
@@ -183,10 +255,11 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      const approvable = await Promise.all(
-        cr.spec.changes.map((item) => canApproveItem(perms, item)),
-      );
-      const denied = approvable.flatMap((ok, index) => (ok ? [] : [index]));
+      const denied = await deniedItemIndices(perms, cr.spec.changes);
+      if (denied === 'error') {
+        set.status = 403;
+        return { error: 'could not verify the staged objects — approval denied' };
+      }
       if (denied.length > 0) {
         set.status = 403;
         return { error: 'forbidden', deniedItems: denied };
@@ -265,10 +338,8 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      const approvable = await Promise.all(
-        cr.spec.changes.map((item) => canApproveItem(perms, item)),
-      );
-      if (approvable.some((ok) => !ok)) {
+      const denied = await deniedItemIndices(perms, cr.spec.changes);
+      if (denied === 'error' || denied.length > 0) {
         set.status = 403;
         return { error: 'forbidden' };
       }

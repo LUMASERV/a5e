@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { Permission } from '@a5e/schemas';
-import { canAct, planList } from './permission-engine';
+import { canAct, mergedLabelsAfterPatch, planList } from './permission-engine';
 
 const clusterHost = RESOURCE_DESCRIPTORS_BY_KIND.ClusterAnsibleHost!;
 const host = RESOURCE_DESCRIPTORS_BY_KIND.AnsibleHost!;
@@ -60,5 +60,33 @@ describe('label selectors', () => {
     expect(canAct([notProd], { type: 'AnsibleHost', labels: { env: 'prod' } }, 'approve')).toBe(
       false,
     );
+  });
+});
+
+describe('mergedLabelsAfterPatch', () => {
+  const current = { env: 'dev', team: 'a' };
+
+  test('a patch that does not mention labels leaves them alone', () => {
+    expect(mergedLabelsAfterPatch(current, { spec: { enabled: false } })).toEqual(current);
+  });
+
+  test('a per-key null removes just that key', () => {
+    expect(mergedLabelsAfterPatch(current, { metadata: { labels: { team: null } } })).toEqual({
+      env: 'dev',
+    });
+  });
+
+  // Regression: `labels: null` removes the whole map (RFC 7396), but this used to return the
+  // CURRENT labels — so an env=dev approver could approve a patch that stripped every label and
+  // moved the object outside their own grant.
+  test('a null labels field clears every label', () => {
+    expect(mergedLabelsAfterPatch(current, { metadata: { labels: null } })).toEqual({});
+  });
+
+  test('clearing every label escapes a label-scoped grant', () => {
+    const devOnly = grant({ labelSelector: { matchLabels: { env: 'dev' } } });
+    const after = mergedLabelsAfterPatch(current, { metadata: { labels: null } });
+    expect(canAct([devOnly], { type: 'AnsibleHost', labels: current }, 'approve')).toBe(true);
+    expect(canAct([devOnly], { type: 'AnsibleHost', labels: after }, 'approve')).toBe(false);
   });
 });

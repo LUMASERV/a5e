@@ -250,8 +250,14 @@ export function mergedLabelsAfterPatch(
   patchBody: unknown,
 ): Record<string, string> | undefined {
   const patchLabels = (
-    patchBody as { metadata?: { labels?: Record<string, string | null> } } | undefined
+    patchBody as { metadata?: { labels?: Record<string, string | null> | null } } | undefined
   )?.metadata?.labels;
+  // `metadata.labels: null` removes the whole map (RFC 7396), so the object ends up with no
+  // labels at all. This used to fall into the `return current` below, checking the patch against
+  // labels it was about to delete — which let a label-scoped grant approve a patch that strips
+  // every label, moving the object outside that grant (and into the match set of any
+  // `NotIn`-style grant). Checked before the falsy test, which would otherwise swallow it.
+  if (patchLabels === null) return {};
   if (!patchLabels) return current;
   const merged: Record<string, string> = { ...current };
   for (const [key, value] of Object.entries(patchLabels)) {
