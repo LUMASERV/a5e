@@ -16,10 +16,14 @@ function matchesAction(p: Permission, action: string): boolean {
 }
 
 function namespaceMatches(p: Permission, namespace: string | undefined): boolean {
+  // An empty list is the only way to say "no namespace restriction" — it's also how a grant for a
+  // cluster-scoped kind is normally written.
   if (p.namespaces.length === 0) return true;
-  // Cluster-scoped kinds have no namespace — `namespaces` is meaningless for them, so an entry
-  // there never excludes a cluster-scoped object.
-  if (namespace === undefined) return true;
+  // A cluster-scoped target has no namespace to match against, so a grant that DOES name
+  // namespaces cannot cover it. This used to return true, which meant a grant an admin wrote as
+  // "team-a only" silently carried full access to every ClusterAnsibleHost/Playbook/SSHKey in the
+  // cluster — a namespace list that read as a fence and wasn't one.
+  if (namespace === undefined) return false;
   return p.namespaces.includes(namespace);
 }
 
@@ -39,7 +43,15 @@ export async function resolveEffectivePermissions(
   const user = await findUserBySession(session);
   const direct = (user?.spec.permissions ?? []) as Permission[];
 
-  const groupNames = session.identity.impersonateGroups ?? [];
+  // A local account's groups are read fresh from its `User` CR on every request, so an admin
+  // removing someone from a group takes effect immediately rather than at that person's next
+  // login — the session's own copy is a login-time snapshot and must not be trusted for this.
+  // An OIDC-only identity has no CR-held group list (its groups come from the ID token claim), so
+  // there it stays the snapshot, bounded by the session TTL in auth/session-store.ts.
+  const groupNames =
+    (session.kind === 'local' ? user?.spec.impersonateGroups : undefined) ??
+    session.identity.impersonateGroups ??
+    [];
   const groups = await listGroups();
   const fromGroups = groups
     .filter((g) => groupNames.includes(g.name))
@@ -114,13 +126,18 @@ export function planList(
   if (applicable.length === 0) return { mode: 'denied' };
 
   if (descriptor.scope === 'Cluster') {
-    if (applicable.some((p) => !p.labelSelector)) {
+    // Same rule as namespaceMatches above: a grant that names namespaces can't cover a
+    // cluster-scoped kind, so it must not widen this listing either — otherwise the list would
+    // show objects every per-object check (get/update/delete) then refuses.
+    const clusterWide = applicable.filter((p) => p.namespaces.length === 0);
+    if (clusterWide.length === 0) return { mode: 'denied' };
+    if (clusterWide.some((p) => !p.labelSelector)) {
       return { mode: 'list', entries: [{ labelSelector: undefined }] };
     }
     return {
       mode: 'list',
       entries: dedupeEntries(
-        applicable.map((p) => ({ labelSelector: labelSelectorToString(p.labelSelector) })),
+        clusterWide.map((p) => ({ labelSelector: labelSelectorToString(p.labelSelector) })),
       ),
     };
   }

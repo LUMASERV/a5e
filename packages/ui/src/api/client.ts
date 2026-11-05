@@ -1,5 +1,5 @@
 import { apiOrigin } from './runtime-config';
-import { getToken } from './token';
+import { getToken, setToken } from './token';
 
 export interface ListResult<T> {
   items: T[];
@@ -29,11 +29,24 @@ export function apiUrl(path: string): string {
   return `${apiOrigin()}/api/v1${path}`;
 }
 
+/**
+ * Sessions now expire server-side (see api/src/auth/session-store.ts), so a 401 can arrive on any
+ * call, not just the first one after a page load — the router's guard only checks a session once
+ * per load. Drop the dead token and send the browser to the login page, rather than letting every
+ * open view render its own "unauthorized" error. Guarded against looping when /login's own
+ * /whoami call is the one that 401s.
+ */
+function handleExpiredSession(): void {
+  setToken(null);
+  if (window.location.pathname !== '/login') window.location.href = '/login';
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(apiUrl(path), {
     headers: { 'content-type': 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
     ...init,
   });
+  if (res.status === 401 && getToken()) handleExpiredSession();
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string });
     throw new ApiError(res.status, body.error ?? `request failed: ${res.status}`);

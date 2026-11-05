@@ -800,10 +800,26 @@ async function pollParallelRun(
         for (let i = 0; i < updated.length && freeSlots > 0; i++) {
           if (updated[i]!.phase !== 'Pending') continue;
           const pendingShard = updated[i]!;
+          const limit = limitForHostNames(prep.groups, pendingShard.hosts);
+          // Every host this shard was assigned has since left the inventory. Starting a Job now
+          // would hand ansibleExtraArgs an empty `limit`, which it drops entirely — the pod would
+          // run the playbook against the WHOLE inventory instead of this shard's (now absent)
+          // hosts. Nothing left to do, so finish the shard the same way startParallelRun finishes
+          // a run that resolved to zero hosts.
+          if (!limit) {
+            updated[i] = {
+              ...pendingShard,
+              phase: 'Succeeded',
+              startTime: new Date().toISOString(),
+              completionTime: new Date().toISOString(),
+            };
+            changed = true;
+            continue;
+          }
           const shard: HostShard = {
             index: pendingShard.index,
             hostNames: pendingShard.hosts,
-            limit: limitForHostNames(prep.groups, pendingShard.hosts),
+            limit,
           };
           updated[i] = await startShardJob(core, runnerImage, obj, prep, shard);
           freeSlots--;

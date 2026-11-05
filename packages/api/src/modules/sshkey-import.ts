@@ -142,9 +142,21 @@ export function registerSSHKeyImportRoutes(app: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      if (!canAct(perms, { type: 'ClusterAnsibleSSHKey' }, 'import')) {
+      // Two separate things happen below, so both are checked: creating the cluster-scoped object,
+      // and writing private key material into `secretNamespace` as the API's own privileged
+      // identity. Without the second check, one ClusterAnsibleSSHKey grant let any caller plant a
+      // Secret in ANY namespace (kube-system included) just by naming it in the request body.
+      if (
+        !canAct(perms, { type: 'ClusterAnsibleSSHKey' }, 'import') ||
+        !canAct(perms, { type: 'AnsibleSSHKey', namespace: importBody.secretNamespace }, 'import')
+      ) {
         set.status = 403;
-        return { error: 'forbidden', type: 'ClusterAnsibleSSHKey', action: 'import' };
+        return {
+          error: 'forbidden',
+          type: 'ClusterAnsibleSSHKey',
+          namespace: importBody.secretNamespace,
+          action: 'import',
+        };
       }
 
       const resolved = await resolvePrivateKeyContent(importBody);

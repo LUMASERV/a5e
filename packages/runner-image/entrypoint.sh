@@ -35,7 +35,11 @@ case "$STEP" in
     ;;
 
   playbook)
-    # env: PLAYBOOK_DIR, ENTRY_POINT, INVENTORY_FILE, EXTRA_VARS_FILE, ANSIBLE_EXTRA_ARGS
+    # env: PLAYBOOK_DIR, ENTRY_POINT, INVENTORY_FILE, EXTRA_VARS_FILE
+    # Any further argv entries are ansible-playbook flags, passed one-per-argument by
+    # job-builder.ts — never a single string this shell has to re-split (a value containing a
+    # space would split in the wrong place, and would let a user smuggle in extra flags).
+    shift
     # No single --private-key: each host in the rendered inventory carries its own
     # ansible_ssh_private_key_file var (SSH keys are a host property, not a run property), so
     # every mounted key just needs correct file permissions.
@@ -46,8 +50,7 @@ case "$STEP" in
       [ -f "$key" ] && chmod 600 "$key"
     done 2>/dev/null || true
     cd "$PLAYBOOK_DIR"
-    # shellcheck disable=SC2086
-    exec ansible-playbook -i "$INVENTORY_FILE" -e "@$EXTRA_VARS_FILE" ${ANSIBLE_EXTRA_ARGS:-} "$ENTRY_POINT"
+    exec ansible-playbook -i "$INVENTORY_FILE" -e "@$EXTRA_VARS_FILE" "$@" "$ENTRY_POINT"
     ;;
 
   *)

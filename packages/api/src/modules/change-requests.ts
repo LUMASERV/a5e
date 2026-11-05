@@ -4,9 +4,15 @@ import type {
   ChangeRequestSpec,
   ChangeRequestStatus,
   CustomResource,
+  Permission,
 } from '@a5e/schemas';
 import { authorize } from '../auth/authorize';
-import { canAct, resolveEffectivePermissions } from '../auth/permission-engine';
+import type { ActionTarget } from '../auth/permission-engine';
+import {
+  canAct,
+  mergedLabelsAfterPatch,
+  resolveEffectivePermissions,
+} from '../auth/permission-engine';
 import { extractBearerToken } from '../auth/session';
 import type { Session } from '../auth/session';
 import { readAppSettings } from '../lib/app-settings-store';
@@ -26,12 +32,54 @@ function appUserId(session: Session): string {
     : `oidc:${session.identity.impersonateUser}`;
 }
 
-function itemTarget(item: ChangeItem) {
-  return {
-    type: item.type,
-    namespace: item.namespace,
-    labels: (item.body as { metadata?: { labels?: Record<string, string> } })?.metadata?.labels,
-  };
+/**
+ * The approve/decline permission check for one staged item.
+ *
+ * The labels MUST come from the object as it exists in the cluster, never from `item.body` — that
+ * body is whatever the *requester* typed. Trusting it meant a requester could stage an update to a
+ * production object while writing `labels: {env: dev}` into the body, and an approver whose grant
+ * only covers `env=dev` would see a dev-looking item, approve it, and the patch would land on the
+ * production object. A `delete` item carries no body at all, so every label-restricted grant was
+ * being evaluated against no labels (and a `NotIn`-style grant matched everything, prod included).
+ *
+ * For an `update` the post-patch labels are checked too — the same both-sides rule the plain
+ * PATCH route applies (see modules/resource-routes.ts), so approving can't be used to relabel an
+ * object out of the approver's own scope.
+ */
+async function itemTargets(item: ChangeItem): Promise<ActionTarget[]> {
+  const base = { type: item.type, namespace: item.namespace };
+  const bodyLabels = (item.body as { metadata?: { labels?: Record<string, string> } })?.metadata
+    ?.labels;
+
+  if (item.action === 'create') return [{ ...base, labels: bodyLabels }];
+
+  const itemDescriptor = RESOURCE_DESCRIPTORS_BY_KIND[item.type];
+  if (!itemDescriptor) return [{ ...base, labels: bodyLabels }]; // unknown kind — approve will fail anyway
+  const current = await client.get<{ metadata: { labels?: Record<string, string> } }>(
+    itemDescriptor,
+    item.name!,
+    'self',
+    item.namespace,
+  );
+
+  if (item.action === 'delete') return [{ ...base, labels: current.metadata.labels }];
+  return [
+    { ...base, labels: current.metadata.labels },
+    { ...base, labels: mergedLabelsAfterPatch(current.metadata.labels, item.body) },
+  ];
+}
+
+/** True only if the caller may approve every target `itemTargets` produced for this item. A
+ * missing object (deleted since it was staged) counts as not approvable — approving it would fail
+ * anyway, and a 404 must not read as "allowed". */
+async function canApproveItem(perms: Permission[], item: ChangeItem): Promise<boolean> {
+  let targets: ActionTarget[];
+  try {
+    targets = await itemTargets(item);
+  } catch {
+    return false;
+  }
+  return targets.every((target) => canAct(perms, target, 'approve'));
 }
 
 /**
@@ -135,12 +183,39 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      const denied = cr.spec.changes
-        .map((item, index) => ({ index, item }))
-        .filter(({ item }) => !canAct(perms, itemTarget(item), 'approve'));
+      const approvable = await Promise.all(
+        cr.spec.changes.map((item) => canApproveItem(perms, item)),
+      );
+      const denied = approvable.flatMap((ok, index) => (ok ? [] : [index]));
       if (denied.length > 0) {
         set.status = 403;
-        return { error: 'forbidden', deniedItems: denied.map((d) => d.index) };
+        return { error: 'forbidden', deniedItems: denied };
+      }
+
+      const reviewed = {
+        reviewedBy: appUserId(auth.session),
+        reviewedByName: auth.session.displayName,
+        reviewedAt: new Date().toISOString(),
+      };
+
+      // Claim the request before applying anything. `replaceStatus` carries the resourceVersion we
+      // read above, so of two approvers racing (or one double-click) exactly one write lands and
+      // the other gets a 409 — without this both passed the `phase !== 'Pending'` check above and
+      // both ran the loop below, applying every change twice and recording the second pass's
+      // 409s/404s as `Failed` even though everything had actually been applied.
+      try {
+        await client.replaceStatus(
+          descriptor,
+          params.name,
+          { ...cr, status: { ...cr.status, ...reviewed, phase: 'Approved' } },
+          'self',
+        );
+      } catch (err) {
+        if ((err as { code?: number }).code === 409) {
+          set.status = 409;
+          return { error: 'already being reviewed by someone else' };
+        }
+        throw err;
       }
 
       const results: NonNullable<ChangeRequestStatus['results']> = [];
@@ -176,18 +251,7 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
         }
       }
       const phase = results.every((r) => r.status === 'Applied') ? 'Applied' : 'Failed';
-      await client.patchStatus(
-        descriptor,
-        params.name,
-        {
-          phase,
-          reviewedBy: appUserId(auth.session),
-          reviewedByName: auth.session.displayName,
-          reviewedAt: new Date().toISOString(),
-          results,
-        },
-        'self',
-      );
+      await client.patchStatus(descriptor, params.name, { phase, ...reviewed, results }, 'self');
       return { ok: true, phase, results };
     })
 
@@ -201,24 +265,41 @@ export function registerChangeRequestRoutes(initialApp: AnyElysia): AnyElysia {
       }
 
       const perms = await resolveEffectivePermissions(auth.session, auth.role);
-      const denied = cr.spec.changes.some((item) => !canAct(perms, itemTarget(item), 'approve'));
-      if (denied) {
+      const approvable = await Promise.all(
+        cr.spec.changes.map((item) => canApproveItem(perms, item)),
+      );
+      if (approvable.some((ok) => !ok)) {
         set.status = 403;
         return { error: 'forbidden' };
       }
 
-      await client.patchStatus(
-        descriptor,
-        params.name,
-        {
-          phase: 'Declined',
-          reviewedBy: appUserId(auth.session),
-          reviewedByName: auth.session.displayName,
-          reviewedAt: new Date().toISOString(),
-          declineReason: (body as { reason?: string })?.reason,
-        },
-        'self',
-      );
+      // replaceStatus rather than patchStatus: declining is a single write, so carrying the
+      // resourceVersion read above is enough to lose cleanly against an approver who got there
+      // first, instead of overwriting their verdict.
+      try {
+        await client.replaceStatus(
+          descriptor,
+          params.name,
+          {
+            ...cr,
+            status: {
+              ...cr.status,
+              phase: 'Declined',
+              reviewedBy: appUserId(auth.session),
+              reviewedByName: auth.session.displayName,
+              reviewedAt: new Date().toISOString(),
+              declineReason: (body as { reason?: string })?.reason,
+            },
+          },
+          'self',
+        );
+      } catch (err) {
+        if ((err as { code?: number }).code === 409) {
+          set.status = 409;
+          return { error: 'already being reviewed by someone else' };
+        }
+        throw err;
+      }
       return { ok: true };
     });
 }
