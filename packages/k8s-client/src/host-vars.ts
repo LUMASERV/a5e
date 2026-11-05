@@ -10,6 +10,29 @@ export interface SecretReader {
   getSecret(namespace: string, name: string): Promise<{ data?: Record<string, string> }>;
 }
 
+/**
+ * Wraps a reader so each `namespace/name` is fetched once. `resolveVarsBySecretRefs` runs per
+ * host, so a Secret shared by N hosts would otherwise cost N serialized GETs on every run
+ * preparation and every inventory download. Caching the promise also collapses concurrent reads.
+ *
+ * Deliberately per-resolution, not a long-lived cache: one pass sees one consistent snapshot of
+ * each Secret, and the next pass reads fresh.
+ */
+export function cachingSecretReader(inner: SecretReader): SecretReader {
+  const inFlight = new Map<string, Promise<{ data?: Record<string, string> }>>();
+  return {
+    getSecret(namespace, name) {
+      const key = `${namespace}/${name}`;
+      let read = inFlight.get(key);
+      if (!read) {
+        read = inner.getSecret(namespace, name);
+        inFlight.set(key, read);
+      }
+      return read;
+    },
+  };
+}
+
 /** One resolved `varsBySecretRef` entry — kept as its own object rather than pre-flattened so the
  * operator can mount each Secret separately and the API can mask each one's values. */
 export interface ResolvedVarsSecret {

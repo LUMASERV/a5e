@@ -89,9 +89,12 @@ export function canAct(
  * *except* using a Secret. A selector on such a grant scopes a5e's own labelled objects; it says
  * nothing about Secrets, so it must not silently deny here.
  *
- * `permissionSchema` additionally refuses a `labelSelector` on a `Secret`-typed grant outright
- * (see @a5e/schemas' permissions.ts), so ignoring one here can never quietly widen a grant somebody
- * wrote intending to narrow it.
+ * A selector is therefore ignored only on a wildcard grant. One written onto a *type-specific*
+ * grant asks for something this decision cannot implement, so that grant is skipped rather than
+ * silently widened to namespace-only. `permissionSchema` already rejects such a grant, but only on
+ * the settings routes: `User`/`Group` CRDs store permissions through `unvalidatedPermissionSchema`
+ * and `resolveEffectivePermissions` loads them straight from there, so a `kubectl edit` can still
+ * produce one. Fail closed on it.
  */
 export function canActIgnoringLabelSelector(
   perms: Permission[],
@@ -102,7 +105,8 @@ export function canActIgnoringLabelSelector(
     (p) =>
       matchesType(p, target.type) &&
       matchesAction(p, action) &&
-      namespaceMatches(p, target.namespace),
+      namespaceMatches(p, target.namespace) &&
+      (p.labelSelector === undefined || p.type === '*'),
   );
 }
 

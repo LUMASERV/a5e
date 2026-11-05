@@ -65,8 +65,13 @@ Three things follow from these values being real secrets:
   rather than the values:
 
   ```ini
-  db-01 ansible_host=10.0.0.11 db_password="{{ lookup('file', '/host-vars/vars0/db_password', rstrip=False) }}"
+  db-01 ansible_host=10.0.0.11 db_password="{{ lookup('file', '/host-vars/vars-1f3c2ab9d4/db_password', rstrip=False) }}"
   ```
+
+  The mount name is a hash of the source Secret's namespace, name and contents. That keeps it
+  stable across the repeated resolves a parallel run does as it refills shards, and means editing
+  the source Secret mid-run produces a *new* mount rather than overwriting the one an already
+  running Job has mounted — so each shard keeps a consistent snapshot.
 
   So the inventory stays an ordinary ConfigMap you can read and diff while debugging, and the
   values exist only as a byte-for-byte copy of the Secret. (The copy is unavoidable — a Secret

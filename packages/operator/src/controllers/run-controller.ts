@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   type CustomResourceClient,
   type ResolvedGroup,
@@ -169,6 +170,34 @@ async function resolveHostSshKeys(
 }
 
 /**
+ * Content-addresses one host-vars mount: the source Secret's identity *and* its contents.
+ *
+ * Both halves matter, because `prepareRunResources` runs again on every shard refill of a
+ * parallel run (see pollParallelRun) and rewrites the shared inventory ConfigMap, while Jobs
+ * already running keep the mounts their pod spec was built with.
+ *
+ * - Hashing namespace/name instead of using the traversal index keeps a Secret's mount name
+ *   identical across passes. An index would shift if the resolved host order changed, pointing a
+ *   running Job's unchanged inventory path at a different Secret, or at nothing.
+ * - Hashing the data too means an edit to the source Secret produces a *new* mount and a new
+ *   run-owned copy rather than overwriting the one a running Job has mounted. Projected Secret
+ *   volumes refresh in place, and `lookup('file', ...)` reads at task time, not at startup — so
+ *   overwriting would hand a half-finished play different credentials mid-run. The old copy stays
+ *   until the Run is deleted (it is owned by the Run), so in-flight shards keep a stable snapshot
+ *   and later shards get the new one, each consistent with the inventory it was started with.
+ */
+function hostVarsMountId(secret: {
+  namespace: string;
+  name: string;
+  data: Record<string, string>;
+}) {
+  return createHash('sha256')
+    .update(JSON.stringify([secret.namespace, secret.name, secret.data]))
+    .digest('hex')
+    .slice(0, 10);
+}
+
+/**
  * Copies each *distinct* Secret referenced by some host's `varsBySecretRef` into one run-owned
  * Secret in the Run's namespace, deduplicated so hosts sharing a Secret don't get redundant
  * copies/volumes. Mutates each `ResolvedVarsSecret` in place, setting `mountName` to the mount
@@ -199,7 +228,7 @@ async function resolveHostVarsSecrets(
         const secretKey = `${secret.namespace}/${secret.name}`;
         let mount = mountBySecretKey.get(secretKey);
         if (!mount) {
-          const mountName = `vars${mountBySecretKey.size}`;
+          const mountName = `vars-${hostVarsMountId(secret)}`;
           const copyName = `${namePrefix}-hostvars-${mountName}`;
           // `secret.data` is the source Secret's own base64 data, carried over from the resolve
           // step — no second read, and a byte-exact copy even for non-UTF-8 contents.

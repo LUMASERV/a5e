@@ -1,7 +1,12 @@
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleHostSpec, AnsibleInventorySpec, CustomResource } from '@a5e/schemas';
 import type { CallerIdentity, CustomResourceClient } from './customResourceClient';
-import { type ResolvedVarsSecret, type SecretReader, resolveVarsBySecretRefs } from './host-vars';
+import {
+  type ResolvedVarsSecret,
+  type SecretReader,
+  cachingSecretReader,
+  resolveVarsBySecretRefs,
+} from './host-vars';
 import { labelSelectorToString } from './label-selector';
 import { resolveRefNamespace } from './ref-namespace';
 
@@ -128,6 +133,9 @@ export async function resolveInventoryGroups(
   inventoryNamespace: string | undefined,
   options: ResolveInventoryOptions = {},
 ): Promise<ResolvedGroup[]> {
+  // One cache for the whole resolution: hosts commonly share a Secret, and each would otherwise
+  // re-fetch it.
+  const secretReader = options.secretReader && cachingSecretReader(options.secretReader);
   const groups: ResolvedGroup[] = [];
   for (const group of spec.groups) {
     const seen = new Set<string>();
@@ -171,8 +179,8 @@ export async function resolveInventoryGroups(
         if (options.resolveJumpChains && hostObj.spec.jumpHost) {
           resolved.jumpChain = await resolveJumpChain(client, identity, resolved);
         }
-        if (options.secretReader && hostObj.spec.varsBySecretRef?.length) {
-          resolved.varsSecrets = await resolveVarsBySecretRefs(options.secretReader, resolved);
+        if (secretReader && hostObj.spec.varsBySecretRef?.length) {
+          resolved.varsSecrets = await resolveVarsBySecretRefs(secretReader, resolved);
         }
         hosts.push(resolved);
       }
