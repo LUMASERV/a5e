@@ -61,6 +61,23 @@ function isLocalAccount(cr: UserCR): boolean {
   return cr.metadata.name.startsWith('local-');
 }
 
+/**
+ * Whether `cr` is the tracking CR `trackOidcLogin` would have created for exactly `sub`. Both
+ * halves matter: `oidcCRName` is not injective (sanitizeSegment collapses every non-alphanumeric
+ * run to `-` and truncates at 253), so two different subs can land on one name — deleting that
+ * name blind would take out the other identity's record and its role along with it.
+ */
+function isTrackerFor(cr: UserCR, sub: string): boolean {
+  return !isLocalAccount(cr) && cr.spec.sub === sub && cr.metadata.name === oidcCRName(sub);
+}
+
+/** Drops `sub`'s tracker if it's present in an already-fetched list. Every caller has just listed
+ * the users for its own lookup, so this costs no extra API call. */
+async function deleteTrackerFrom(users: UserCR[], sub: string): Promise<void> {
+  const tracker = users.find((u) => isTrackerFor(u, sub));
+  if (tracker) await deleteUserCR(tracker.metadata.name);
+}
+
 /** Usernames aren't k8s object names, so they only need to be tidy rather than DNS-1123 — but
  * they do become the `local:<username>` impersonation identity if the identity is ever promoted
  * to a local account, so keep them to a conservative character set. */
@@ -116,20 +133,23 @@ export function deriveOidcUsername(
  * atomically, so only one of the two can ever become a local account.
  */
 async function claimUsername(desired: string, exceptCRName: string): Promise<string> {
+  // Compare canonical CR names, not raw usernames. Promotion uniqueness is enforced on
+  // localCRName(), which collapses punctuation, so a derived `alice.bob` would otherwise look free
+  // beside an existing `alice-bob` and then fail to promote under the username it displays.
   const taken = new Set(
     (await listUserCRs())
-      .filter((u) => u.metadata.name !== exceptCRName)
-      .map((u) => u.spec.username?.toLowerCase())
-      .filter((name): name is string => Boolean(name)),
+      .filter((u) => u.metadata.name !== exceptCRName && u.spec.username)
+      .map((u) => localCRName(u.spec.username as string)),
   );
-  if (!taken.has(desired.toLowerCase())) return desired;
-  for (let suffix = 2; suffix <= 100; suffix++) {
-    const candidate = `${desired}-${suffix}`;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
+  const isFree = (candidate: string) => !taken.has(localCRName(candidate));
+  if (isFree(desired)) return desired;
+  // Past 100 collisions switch to a random suffix rather than scanning further — still checked,
+  // so the fallback can't collide either. Terminates: `taken` is finite.
+  for (let attempt = 2; ; attempt++) {
+    const candidate =
+      attempt <= 100 ? `${desired}-${attempt}` : `${desired}-${randomUUID().slice(0, 8)}`;
+    if (isFree(candidate)) return candidate;
   }
-  // 100 identities all deriving the same username is not a real scenario, but a login must never
-  // fail just because this loop ran out — fall back to something unique by construction.
-  return `${desired}-${randomUUID().slice(0, 8)}`;
 }
 
 async function getUserCR(name: string): Promise<UserCR | undefined> {
@@ -228,7 +248,13 @@ export async function findAccountBySub(sub: string): Promise<LocalIdentity | und
   // ConfigMap/Secret-blob design's full-list-and-find.
   const users = await listUserCRs();
   const match = users.find((u) => isLocalAccount(u) && u.spec.sub === sub);
-  return match ? toLocalIdentity(match) : undefined;
+  if (!match) return undefined;
+  // Self-heal: a tracker for an already-linked sub is a duplicate row that nothing can reach any
+  // more. It survives a failed startup prune, or an old pod recreating one mid-rollout. This is
+  // the only path such a login takes — linkAccountToSub's already-linked branch can't run, since
+  // this function is tried first (auth/routes.ts) and returns.
+  await deleteTrackerFrom(users, sub);
+  return toLocalIdentity(match);
 }
 
 /** See LocalAccount.linkedSub's old doc comment (now UserSpec.sub) for the email-match rules this
@@ -255,9 +281,8 @@ export async function linkAccountToSub(
   // This sub may already have an `oidc-<sub>` tracking CR from logins that happened *before* this
   // local account existed (or before it had a matching email). That CR is now superseded by the
   // local account we just linked, and leaving it behind is exactly what made the same person show
-  // up twice in the Users list under one email address. createLinkedLocalAccount does the same
-  // cleanup for the manual promotion path; automatic linking has to match it.
-  await deleteUserCR(oidcCRName(sub));
+  // up twice in the Users list under one email address.
+  await deleteTrackerFrom(users, sub);
   return toLocalIdentity(match);
 }
 
@@ -339,11 +364,7 @@ export async function pruneSupersededOidcIdentities(): Promise<void> {
   // created. Anything else carrying a claimed sub — a hand-written CR, a future naming scheme — is
   // left alone rather than deleted on an assumption about what it is.
   const superseded = users.filter(
-    (u) =>
-      !isLocalAccount(u) &&
-      u.spec.sub &&
-      claimedSubs.has(u.spec.sub) &&
-      u.metadata.name === oidcCRName(u.spec.sub),
+    (u) => u.spec.sub && claimedSubs.has(u.spec.sub) && isTrackerFor(u, u.spec.sub),
   );
   for (const cr of superseded) await deleteUserCR(cr.metadata.name);
   if (superseded.length > 0) {
@@ -421,7 +442,7 @@ export async function createLinkedLocalAccount(
   // an improvement the CRD move enables: the old ConfigMap-blob design just left that entry
   // sitting there, hidden by a listing filter. A real CRD is kubectl-visible, so leaving a
   // duplicate object around would be worse hygiene than a hidden blob entry ever was.
-  await deleteUserCR(oidcCRName(linkedSub));
+  await deleteTrackerFrom(users, linkedSub);
 }
 
 /** Combined view over every identity that can log in — the single data structure behind the
