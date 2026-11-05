@@ -1,6 +1,12 @@
 import { RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
 import type { AnsibleHostSpec, AnsibleInventorySpec, CustomResource } from '@a5e/schemas';
 import type { CallerIdentity, CustomResourceClient } from './customResourceClient';
+import {
+  type ResolvedVarsSource,
+  type VarsSourceReader,
+  cachingVarsSourceReader,
+  resolveVarsFrom,
+} from './host-vars';
 import { labelSelectorToString } from './label-selector';
 import { resolveRefNamespace } from './ref-namespace';
 
@@ -19,6 +25,12 @@ export interface ResolvedHost {
   jumpChain?: JumpChainHop[];
   /** Populated by run-controller.ts after copying this host's `spec.sshKeyRef` target's Secret into a run-owned one — the mount name under `/ssh-keys/<name>/ssh-privatekey` in the Job (plan: SSH keys are a host property, not a run property, since different hosts commonly need different keys). */
   sshKeyMountName?: string;
+  /**
+   * Populated by `resolveInventoryGroups` only when it was given a `varsSourceReader` — one entry
+   * per `spec.varsFrom` reference, in spec order. The vars they contribute sit underneath
+   * `spec.vars` (an explicit inline var of the same name wins).
+   */
+  varsSources?: ResolvedVarsSource[];
 }
 
 function refKey(kind: string, namespace: string | undefined, name: string): string {
@@ -91,6 +103,17 @@ export interface ResolvedGroup {
   children?: string[];
 }
 
+export interface ResolveInventoryOptions {
+  /** Set by the run controller (and the API's inventory-download route), which need real `-J`
+   * chains for rendering; the inventory controller's status-only host-count reconcile leaves
+   * this off to avoid the extra lookups. */
+  resolveJumpChains?: boolean;
+  /** Set by the same two callers to also dereference each host's `spec.varsFrom` into
+   * `ResolvedHost.varsSources`; left off wherever only host membership matters, so a host-count
+   * reconcile never reads a Secret or ConfigMap at all. */
+  varsSourceReader?: VarsSourceReader;
+}
+
 /**
  * Resolves every group's `hostSources[]` against live AnsibleHost/ClusterAnsibleHost objects
  * (plan §2.6/§3.4). `inventoryNamespace` is the resolving inventory's own namespace (undefined
@@ -108,11 +131,12 @@ export async function resolveInventoryGroups(
   identity: CallerIdentity,
   spec: AnsibleInventorySpec,
   inventoryNamespace: string | undefined,
-  /** Set by the run controller (and the API's inventory-download route), which need real `-J`
-   * chains for rendering; the inventory controller's status-only host-count reconcile leaves
-   * this off to avoid the extra lookups. */
-  resolveJumpChains = false,
+  options: ResolveInventoryOptions = {},
 ): Promise<ResolvedGroup[]> {
+  // One cache for the whole resolution: hosts commonly share a source, and each would otherwise
+  // re-fetch it.
+  const varsSourceReader =
+    options.varsSourceReader && cachingVarsSourceReader(options.varsSourceReader);
   const groups: ResolvedGroup[] = [];
   for (const group of spec.groups) {
     const seen = new Set<string>();
@@ -153,8 +177,11 @@ export async function resolveInventoryGroups(
           namespace: hostObj.metadata.namespace,
           spec: hostObj.spec,
         };
-        if (resolveJumpChains && hostObj.spec.jumpHost) {
+        if (options.resolveJumpChains && hostObj.spec.jumpHost) {
           resolved.jumpChain = await resolveJumpChain(client, identity, resolved);
+        }
+        if (varsSourceReader && hostObj.spec.varsFrom?.length) {
+          resolved.varsSources = await resolveVarsFrom(varsSourceReader, resolved);
         }
         hosts.push(resolved);
       }

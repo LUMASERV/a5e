@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { PERMISSION_ACTIONS, PERMISSION_TYPES, RESOURCE_DESCRIPTORS_BY_KIND } from '@a5e/schemas';
+import {
+  BUILTIN_PERMISSION_TYPES,
+  PERMISSION_ACTIONS,
+  PERMISSION_TYPES,
+  RESOURCE_DESCRIPTORS_BY_KIND,
+} from '@a5e/schemas';
 import type { Permission } from '@a5e/schemas';
 import { onMounted } from 'vue';
 import { useNamespaceStore } from '../stores/namespace';
@@ -27,12 +32,23 @@ const TYPE_SPECIFIC_ACTIONS: Record<string, readonly string[]> = {
   ClusterAnsibleSSHKey: ['import'],
   ChangeRequest: ['approve'],
 };
+/** The built-in v1 kinds (BUILTIN_PERMISSION_TYPES), not CRDs of this project: a5e never lists,
+ * reads back or writes a user's Secrets/ConfigMaps, so none of the CRUD verbs above apply — the
+ * only thing it does is dereference one a host's `varsFrom` names, which is `use`. */
+const EXACT_ACTIONS: Record<string, readonly string[]> = { Secret: ['use'], ConfigMap: ['use'] };
 const ALL_REAL_ACTIONS = PERMISSION_ACTIONS.filter((a) => a !== 'propose');
 
 function actionOptionsFor(type: string): readonly string[] {
   // A wildcard type could resolve to any kind at check time, so every real action stays selectable.
   if (type === '*') return ALL_REAL_ACTIONS;
-  return [...UNIVERSAL_ACTIONS, ...(TYPE_SPECIFIC_ACTIONS[type] ?? [])];
+  return EXACT_ACTIONS[type] ?? [...UNIVERSAL_ACTIONS, ...(TYPE_SPECIFIC_ACTIONS[type] ?? [])];
+}
+
+/** A `Secret`/`ConfigMap` grant is matched on namespace only — the API deliberately never reads
+ * the object just to check its labels (auth/vars-from.ts), so offering a selector here would let
+ * an admin set a restriction that is then silently ignored. `permissionSchema` rejects one too. */
+function supportsLabelSelector(type: string): boolean {
+  return !(BUILTIN_PERMISSION_TYPES as readonly string[]).includes(type);
 }
 
 function isClusterScoped(type: string): boolean {
@@ -59,6 +75,7 @@ function setType(index: number, type: string) {
   update(index, {
     type: type as Permission['type'],
     namespaces: isClusterScoped(type) ? [] : current.namespaces,
+    labelSelector: supportsLabelSelector(type) ? current.labelSelector : undefined,
     // Drop any action that doesn't apply to the new type (e.g. switching off AnsibleInventory
     // should drop a stray 'download') — '*' ("all actions") always stays valid regardless of type.
     actions: current.actions.includes('*')
@@ -123,10 +140,12 @@ function removePermission(index: number) {
 
           <el-form-item label="Labels">
             <LabelSelectorEditor
+              v-if="supportsLabelSelector(perm.type)"
               :model-value="perm.labelSelector ?? {}"
               :disabled="disabled"
               @update:model-value="(v) => update(index, { labelSelector: Object.keys(v.matchLabels ?? {}).length ? v : undefined })"
             />
+            <span v-else style="color: var(--el-text-color-secondary)">Not applicable — Secret/ConfigMap grants are scoped by namespace only</span>
           </el-form-item>
 
           <el-form-item label="Actions">

@@ -77,6 +77,39 @@ export function canAct(
   );
 }
 
+/**
+ * `canAct` without the label-selector check, for a target whose labels this app never reads.
+ *
+ * The only such targets are the built-in `Secret`/`ConfigMap` types (`use`, see auth/vars-from.ts):
+ * a5e does not manage them, it only dereferences one a host's `varsFrom` names, and it may
+ * legitimately be pointed at an object that does not exist yet — so there are no labels to match a
+ * selector against. Routing that decision through `canAct` was a real bug: with no `labels` on the target,
+ * `labelSelectorMatches` rejects every grant that carries a selector, so a broad
+ * `{ type: '*', actions: ['*'], labelSelector: ... }` grant would authorize everything in the app
+ * *except* using a Secret. A selector on such a grant scopes a5e's own labelled objects; it says
+ * nothing about Secrets, so it must not silently deny here.
+ *
+ * A selector is therefore ignored only on a wildcard grant. One written onto a *type-specific*
+ * grant asks for something this decision cannot implement, so that grant is skipped rather than
+ * silently widened to namespace-only. `permissionSchema` already rejects such a grant, but only on
+ * the settings routes: `User`/`Group` CRDs store permissions through `unvalidatedPermissionSchema`
+ * and `resolveEffectivePermissions` loads them straight from there, so a `kubectl edit` can still
+ * produce one. Fail closed on it.
+ */
+export function canActIgnoringLabelSelector(
+  perms: Permission[],
+  target: { type: string; namespace?: string },
+  action: PermissionAction,
+): boolean {
+  return perms.some(
+    (p) =>
+      matchesType(p, target.type) &&
+      matchesAction(p, action) &&
+      namespaceMatches(p, target.namespace) &&
+      (p.labelSelector === undefined || p.type === '*'),
+  );
+}
+
 export interface ListPlanEntry {
   /** undefined = every namespace (Cluster-scoped kind, or an unrestricted "all namespaces" grant). */
   namespace?: string;

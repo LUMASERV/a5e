@@ -8,6 +8,7 @@ import JumpHostEditor from '../../components/JumpHostEditor.vue';
 import LabelsEditor from '../../components/LabelsEditor.vue';
 import ObjectRefPicker from '../../components/ObjectRefPicker.vue';
 import VarsEditor from '../../components/VarsEditor.vue';
+import VarsFromEditor from '../../components/VarsFromEditor.vue';
 import { useChangeRequestDraftStore } from '../../stores/changeRequestDraft';
 import { useNamespaceStore } from '../../stores/namespace';
 import { useHostStore } from '../../stores/resources';
@@ -104,6 +105,9 @@ async function save() {
       />
       <el-form-item label="Jump host">
         <JumpHostEditor v-model="form.spec.jumpHost" :namespace="formNamespace" parent-scope="namespaced" />
+      </el-form-item>
+      <el-form-item label="Vars from">
+        <VarsFromEditor v-model="form.spec.varsFrom" :namespace-required="false" />
       </el-form-item>
       <el-form-item label="Vars (YAML)">
         <VarsEditor v-model="form.spec.vars" />

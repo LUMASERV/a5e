@@ -10,5 +10,6 @@ export * from './jobs';
 export * from './change-requests';
 export * from './groups';
 export * from './permissions';
+export * from './secret-masking';
 export * from './users';
 export * from './crd-meta';
